@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
