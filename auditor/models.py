@@ -10,6 +10,7 @@ from auditor.entities import (
     AuditStatus,
     AuditSummary,
     Bill,
+    CategoryUtilizationScore,
     Clause,
     CoverageCategory,
     Exclusion,
@@ -18,6 +19,8 @@ from auditor.entities import (
     LineItem,
     Policy,
     PolicyMeta,
+    UpgradeRecommendation,
+    UtilizationReport,
 )
 
 __all__ = [
@@ -26,6 +29,7 @@ __all__ = [
     "AuditStatus",
     "AuditSummary",
     "Bill",
+    "CategoryUtilizationScore",
     "Clause",
     "CoverageCategory",
     "Exclusion",
@@ -34,4 +38,6 @@ __all__ = [
     "LineItem",
     "Policy",
     "PolicyMeta",
+    "UpgradeRecommendation",
+    "UtilizationReport",
 ]

@@ -4,6 +4,7 @@ from auditor.entities.auditor_agent_entity import (
     AuditStatus,
     AuditSummary,
     Bill,
+    CategoryUtilizationScore,
     Clause,
     CoverageCategory,
     DuplicateHandling,
@@ -13,6 +14,8 @@ from auditor.entities.auditor_agent_entity import (
     LineItem,
     Policy,
     PolicyMeta,
+    UpgradeRecommendation,
+    UtilizationReport,
     AuditorAgentEntity,
     to_optional_float,
 )
@@ -25,6 +28,7 @@ __all__ = [
     "AuditSummary",
     "AuditorAgentEntity",
     "Bill",
+    "CategoryUtilizationScore",
     "BaseAgentEntity",
     "Clause",
     "CoverageCategory",
@@ -35,5 +39,7 @@ __all__ = [
     "DuplicateHandling",
     "Policy",
     "PolicyMeta",
+    "UpgradeRecommendation",
+    "UtilizationReport",
     "to_optional_float",
 ]

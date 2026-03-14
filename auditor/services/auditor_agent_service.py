@@ -12,11 +12,14 @@ from auditor.entities import (
     AuditSummary,
     AuditorAgentEntity,
     Bill,
+    CategoryUtilizationScore,
     CoverageCategory,
     Exclusion,
     LineAuditResult,
     LineItem,
     Policy,
+    UpgradeRecommendation,
+    UtilizationReport,
 )
 from auditor.services.base_agent_service import BaseAgentService
 
@@ -261,6 +264,11 @@ class AuditorAgentService(BaseAgentService):
                 "total_approved": result.summary.total_approved,
                 "total_patient_responsible": result.summary.total_patient_responsible,
                 "currency": result.summary.currency,
+                "overall_utilization_score": (
+                    result.utilization_report.overall_utilization_score
+                    if result.utilization_report is not None
+                    else None
+                ),
             }
             return result
         except Exception as exc:  # pragma: no cover - defensive path
@@ -361,7 +369,12 @@ def _audit_invoice(
             "Deductible applied once per invoice."
         ),
     )
-    return AuditResult(line_results=line_results, summary=summary)
+    utilization_report = _build_utilization_report(policy=policy, line_results=line_results)
+    return AuditResult(
+        line_results=line_results,
+        summary=summary,
+        utilization_report=utilization_report,
+    )
 
 
 def _evaluate_line(
@@ -585,6 +598,20 @@ def _validate_inputs(policy: Policy, bill: Bill) -> None:
             errors.append(f"policy.coverage_categories[{i}].name is required")
         if category.coverage_rate < 0:
             errors.append(f"policy.coverage_categories[{i}].coverage_rate must be >= 0")
+        if category.premium_score is not None and not (0 <= category.premium_score <= 100):
+            errors.append(
+                f"policy.coverage_categories[{i}].premium_score must be between 0 and 100"
+            )
+        if category.upgrade_premium_cost is not None and category.upgrade_premium_cost < 0:
+            errors.append(
+                f"policy.coverage_categories[{i}].upgrade_premium_cost must be >= 0"
+            )
+        if category.upgrade_coverage_rate is not None and not (
+            0 <= category.upgrade_coverage_rate <= 1
+        ):
+            errors.append(
+                f"policy.coverage_categories[{i}].upgrade_coverage_rate must be between 0 and 1"
+            )
 
     for i, line in enumerate(bill.line_items):
         if not line.item_name:
@@ -655,3 +682,147 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _build_utilization_report(policy: Policy, line_results: list[LineAuditResult]) -> UtilizationReport:
+    category_scores: list[CategoryUtilizationScore] = []
+    upgrade_recommendations: list[UpgradeRecommendation] = []
+
+    weighted_score_sum = 0.0
+    weighted_amount_sum = 0.0
+
+    for category in policy.coverage_categories:
+        matched_lines = [
+            line for line in line_results if line.matched_policy_category_id == category.id
+        ]
+        total_billed = round(sum(line.line_total_cost for line in matched_lines), 2)
+        total_approved = round(sum(line.allowed_amount for line in matched_lines), 2)
+        line_count = len(matched_lines)
+
+        coverage_score = round(_clamp_score(category.coverage_rate * 100.0), 2)
+        premium_score = (
+            round(_clamp_score(category.premium_score), 2)
+            if category.premium_score is not None
+            else round(_infer_premium_score(total_billed=total_billed, total_approved=total_approved), 2)
+        )
+        utilization_score = (
+            round(_clamp_score((total_approved / total_billed) * 100.0), 2)
+            if total_billed > 0
+            else 0.0
+        )
+        category_total_score = round(
+            (premium_score + coverage_score + utilization_score) / 3.0, 2
+        )
+
+        if total_billed > 0:
+            weighted_score_sum += category_total_score * total_billed
+            weighted_amount_sum += total_billed
+
+        category_scores.append(
+            CategoryUtilizationScore(
+                category_id=category.id,
+                category_name=category.name,
+                premium_score=premium_score,
+                coverage_score=coverage_score,
+                utilization_score=utilization_score,
+                category_total_score=category_total_score,
+                total_billed=total_billed,
+                total_approved=total_approved,
+                line_count=line_count,
+                recommendation=_category_recommendation(
+                    category_total_score=category_total_score,
+                    coverage_score=coverage_score,
+                    utilization_score=utilization_score,
+                    total_billed=total_billed,
+                ),
+            )
+        )
+
+        if (
+            total_billed > 0
+            and category.upgrade_premium_cost is not None
+            and category.upgrade_coverage_rate is not None
+        ):
+            additional_cost = round(max(0.0, category.upgrade_premium_cost), 2)
+            delta_rate = max(0.0, category.upgrade_coverage_rate - category.coverage_rate)
+            estimated_additional_payout = round(total_billed * delta_rate, 2)
+            worth_it = estimated_additional_payout > additional_cost
+            recommendation = (
+                (
+                    f"Upgrade looks worth it for '{category.name}': estimated extra payout "
+                    f"USD {estimated_additional_payout} is higher than additional cost "
+                    f"USD {additional_cost}."
+                )
+                if worth_it
+                else (
+                    f"Upgrade may not be worth it for '{category.name}': estimated extra payout "
+                    f"USD {estimated_additional_payout} is not higher than additional cost "
+                    f"USD {additional_cost}."
+                )
+            )
+            upgrade_recommendations.append(
+                UpgradeRecommendation(
+                    category_id=category.id,
+                    category_name=category.name,
+                    additional_cost=additional_cost,
+                    estimated_additional_payout=estimated_additional_payout,
+                    worth_it=worth_it,
+                    recommendation=recommendation,
+                )
+            )
+
+    if weighted_amount_sum > 0:
+        overall = round(weighted_score_sum / weighted_amount_sum, 2)
+    elif category_scores:
+        overall = round(
+            sum(category.category_total_score for category in category_scores)
+            / len(category_scores),
+            2,
+        )
+    else:
+        overall = 0.0
+
+    return UtilizationReport(
+        category_scores=category_scores,
+        overall_utilization_score=overall,
+        overall_recommendation=_overall_recommendation(overall),
+        upgrade_recommendations=upgrade_recommendations,
+    )
+
+
+def _clamp_score(score: float) -> float:
+    return max(0.0, min(100.0, score))
+
+
+def _infer_premium_score(total_billed: float, total_approved: float) -> float:
+    if total_billed <= 0:
+        return 60.0
+    patient_ratio = max(0.0, min(1.0, (total_billed - total_approved) / total_billed))
+    return _clamp_score((1.0 - patient_ratio) * 100.0)
+
+
+def _category_recommendation(
+    category_total_score: float,
+    coverage_score: float,
+    utilization_score: float,
+    total_billed: float,
+) -> str:
+    if total_billed <= 0:
+        return "No claim data for this category yet; monitor with more invoices."
+    if category_total_score >= 75:
+        return "Strong value in this category based on current utilization."
+    if category_total_score >= 55:
+        if coverage_score < 70:
+            return "Moderate value; coverage rate is the main weakness to improve."
+        if utilization_score < 60:
+            return "Moderate value; current claim usage is low for this category."
+        return "Moderate value overall; keep monitoring claim trends."
+    return "Low value in this category; consider plan adjustments."
+
+
+def _overall_recommendation(overall_score: float) -> str:
+    if overall_score >= 75:
+        return "Overall plan looks worth it for this bill profile."
+    if overall_score >= 55:
+        return "Overall plan has mixed value; review weak categories before renewal."
+    return "Overall plan currently looks low-value for this bill profile."

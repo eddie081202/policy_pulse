@@ -102,13 +102,15 @@ If the LLM call fails at runtime, the system falls back to `KeywordSemanticMatch
 4. Apply out-of-scope rules (for example, `accident_only`).
 5. Compute allowed amount and patient responsibility.
 6. Apply deductible once at invoice level.
-7. Return `line_results` and `summary` in USD.
+7. Return `line_results`, `summary`, and `utilization_report` in USD.
 
 ## Data Contract Summary
 
 - Policy input must provide:
   - `meta.currency`, `meta.deductible`, `meta.coinsurance`
   - `coverage_categories[]` with `id`, `name`, `coverage_rate`, `scope`, and `clauses[]`
+  - Optional score tuning fields per category: `premium_score` (0-100)
+  - Optional upgrade simulation fields per category: `upgrade_premium_cost`, `upgrade_coverage_rate`
   - `exclusions[]` with `id`, `name`, and `clauses[]`
 - Bill input must provide:
   - `invoice_meta.diagnosis` (required for scope checks)
@@ -118,6 +120,9 @@ If the LLM call fails at runtime, the system falls back to `KeywordSemanticMatch
   - `allowed_amount`, `patient_responsible_amount`
   - `flags`, `reason`, and `applied_clauses`
   - Aggregated summary totals in USD
+  - `utilization_report.category_scores[]` (premium/coverage/utilization/category total)
+  - `utilization_report.overall_utilization_score` and `overall_recommendation`
+  - `utilization_report.upgrade_recommendations[]` with `worth_it` decision
 
 ## Integration Dependencies
 

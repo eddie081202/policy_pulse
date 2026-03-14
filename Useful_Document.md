@@ -135,6 +135,34 @@ auditor/
     "total_approved": 960,
     "total_patient_responsible": 240,
     "currency": "USD"
+  },
+  "utilization_report": {
+    "category_scores": [
+      {
+        "category_id": "diagnostic_imaging",
+        "category_name": "Diagnostic Imaging",
+        "premium_score": 78.0,
+        "coverage_score": 80.0,
+        "utilization_score": 80.0,
+        "category_total_score": 79.33,
+        "total_billed": 1200.0,
+        "total_approved": 960.0,
+        "line_count": 1,
+        "recommendation": "Strong value in this category based on current utilization."
+      }
+    ],
+    "overall_utilization_score": 79.33,
+    "overall_recommendation": "Overall plan looks worth it for this bill profile.",
+    "upgrade_recommendations": [
+      {
+        "category_id": "diagnostic_imaging",
+        "category_name": "Diagnostic Imaging",
+        "additional_cost": 120.0,
+        "estimated_additional_payout": 180.0,
+        "worth_it": true,
+        "recommendation": "Upgrade looks worth it for 'Diagnostic Imaging': estimated extra payout USD 180.0 is higher than additional cost USD 120.0."
+      }
+    ]
   }
 }
 ```

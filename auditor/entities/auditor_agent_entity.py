@@ -34,6 +34,9 @@ class CoverageCategory:
     coverage_rate: float = 0.0
     per_item_limit: float | None = None
     per_day_limit: float | None = None
+    premium_score: float | None = None
+    upgrade_premium_cost: float | None = None
+    upgrade_coverage_rate: float | None = None
     scope: str = "all_conditions"
     clauses: list[Clause] = field(default_factory=list)
 
@@ -48,6 +51,9 @@ class CoverageCategory:
             coverage_rate=category_rate,
             per_item_limit=to_optional_float(raw.get("per_item_limit")),
             per_day_limit=to_optional_float(raw.get("per_day_limit")),
+            premium_score=to_optional_float(raw.get("premium_score")),
+            upgrade_premium_cost=to_optional_float(raw.get("upgrade_premium_cost")),
+            upgrade_coverage_rate=to_optional_float(raw.get("upgrade_coverage_rate")),
             scope=str(raw.get("scope", "all_conditions")),
             clauses=[Clause.from_dict(x) for x in raw.get("clauses", [])],
         )
@@ -191,9 +197,42 @@ class AuditSummary:
 
 
 @dataclass
+class CategoryUtilizationScore:
+    category_id: str
+    category_name: str
+    premium_score: float
+    coverage_score: float
+    utilization_score: float
+    category_total_score: float
+    total_billed: float
+    total_approved: float
+    line_count: int
+    recommendation: str
+
+
+@dataclass
+class UpgradeRecommendation:
+    category_id: str
+    category_name: str
+    additional_cost: float
+    estimated_additional_payout: float
+    worth_it: bool
+    recommendation: str
+
+
+@dataclass
+class UtilizationReport:
+    category_scores: list[CategoryUtilizationScore] = field(default_factory=list)
+    overall_utilization_score: float = 0.0
+    overall_recommendation: str = ""
+    upgrade_recommendations: list[UpgradeRecommendation] = field(default_factory=list)
+
+
+@dataclass
 class AuditResult:
     line_results: list[LineAuditResult]
     summary: AuditSummary
+    utilization_report: UtilizationReport | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
