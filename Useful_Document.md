@@ -21,9 +21,15 @@ All amounts are represented in USD.
 Member C implementation is organized as:
 
 - `auditor/entities/`
+  - Agent entities:
+    - `base_agent_entity.py`
+    - `auditor_agent_entity.py`
   - Domain entities and data contracts (policy, bill, audit output)
   - Includes `from_dict(...)` parsing helpers
 - `auditor/services/`
+  - Agent services:
+    - `base_agent_service.py`
+    - `auditor_agent_service.py`
   - Core business services:
     - semantic matching
     - input validation
@@ -38,12 +44,16 @@ Member C implementation is organized as:
 ```text
 auditor/
   entities/
+    base_agent_entity.py
+    auditor_agent_entity.py
     base_entity.py
     policy_entity.py
     bill_entity.py
     audit_result_entity.py
     __init__.py
   services/
+    base_agent_service.py
+    auditor_agent_service.py
     base_service.py
     matcher_service.py
     validation_service.py
@@ -56,6 +66,7 @@ auditor/
 
 ### Responsibility split inside `services/`
 
+- `AuditorAgentService.execute(...)`: agent-centric entrypoint (`policy_json`, `bill_json`)
 - `audit_invoice(...)`: top-level orchestration for one invoice
 - `KeywordSemanticMatcher`: default semantic matcher (replaceable by LLM)
 - `_validate_inputs(...)`: schema/data guardrails

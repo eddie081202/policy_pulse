@@ -19,10 +19,13 @@ def audit_invoice(
     policy: Policy,
     bill: Bill,
     matcher: SemanticMatcher | None = None,
+    low_match_confidence_threshold: float = 0.5,
+    duplicate_status: str = "warning",
 ) -> AuditResult:
     validate_audit_inputs(policy, bill)
     active_matcher = matcher or KeywordSemanticMatcher()
     duplicates = _detect_duplicates(bill)
+    resolved_duplicate_status = _resolve_duplicate_status(duplicate_status)
 
     line_results: list[LineAuditResult] = []
     for line in bill.line_items:
@@ -32,7 +35,7 @@ def audit_invoice(
                     line_id=line.id,
                     item_name=line.item_name,
                     matched_policy_category_id=None,
-                    status="warning",
+                    status=resolved_duplicate_status,
                     allowed_amount=0.0,
                     patient_responsible_amount=round(line.total_cost, 2),
                     flags=["duplicate"],
@@ -44,7 +47,15 @@ def audit_invoice(
             continue
 
         match = active_matcher.match_line(line, bill, policy)
-        line_results.append(_evaluate_line(policy, bill, line, match))
+        line_results.append(
+            _evaluate_line(
+                policy=policy,
+                bill=bill,
+                line=line,
+                match=match,
+                low_match_confidence_threshold=low_match_confidence_threshold,
+            )
+        )
 
     _apply_invoice_deductible(policy, line_results)
 
@@ -68,6 +79,7 @@ def _evaluate_line(
     bill: Bill,
     line: LineItem,
     match: MatchResult,
+    low_match_confidence_threshold: float,
 ) -> LineAuditResult:
     category = _get_category(policy, match.category_id)
 
@@ -133,7 +145,7 @@ def _evaluate_line(
     patient = round(max(0.0, line_total - allowed), 2)
 
     # For uncertain semantic matches, downgrade to warning while preserving math.
-    if match.confidence < 0.5:
+    if match.confidence < low_match_confidence_threshold:
         status = "warning"
         flags.append("low_match_confidence")
 
@@ -272,3 +284,7 @@ def _normalize(value: str) -> str:
     for ch in value.lower():
         cleaned.append(ch if ch.isalnum() else " ")
     return " ".join("".join(cleaned).split())
+
+
+def _resolve_duplicate_status(status: str) -> str:
+    return status if status in {"warning", "rejected"} else "warning"
