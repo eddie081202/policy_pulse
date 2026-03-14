@@ -1,7 +1,7 @@
 import json
 
-from auditor.engine import audit_invoice
-from auditor.models import Bill, Policy
+from auditor.entities import Bill, Policy
+from auditor.services import audit_invoice
 from auditor.sample_data import SAMPLE_BILL, SAMPLE_POLICY
 
 

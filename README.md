@@ -16,9 +16,9 @@ All examples and calculations in this project use USD.
 
 This repo now includes a hackathon-ready Auditor scaffold:
 
-- `auditor/models.py`: input/output data models and parsing helpers.
-- `auditor/matcher.py`: pluggable semantic matcher interface with keyword-based fallback.
-- `auditor/engine.py`: core orchestration, duplicate detection, scope checks, payout math, and statuses.
+- `auditor/entities.py`: domain entities (policy, bill, and audit result contracts).
+- `auditor/services.py`: matching + decision services (semantic match, validation, payout logic).
+- `auditor/models.py`, `auditor/matcher.py`, `auditor/engine.py`: compatibility re-export modules.
 - `auditor/sample_data.py`: sample policy and bill payloads in USD.
 - `run_auditor_demo.py`: local smoke test that prints audit JSON.
 
@@ -26,14 +26,14 @@ This repo now includes a hackathon-ready Auditor scaffold:
 
 The Auditor Agent (`Member C`) is split into three clear layers:
 
-1. Input/Output contracts (`auditor/models.py`)
+1. Input/Output contracts (`auditor/entities.py`)
    - Parses raw JSON from Policy Agent and Bill Vision Agent into typed objects.
    - Defines stable output schema for frontend rendering.
-2. Semantic matching (`auditor/matcher.py`)
+2. Semantic matching (`auditor/services.py`)
    - Uses a pluggable `SemanticMatcher` interface.
    - Current implementation is keyword-based for offline demo reliability.
    - Can be replaced with an LLM-backed matcher without touching payout logic.
-3. Decision + calculation engine (`auditor/engine.py`)
+3. Decision + calculation engine (`auditor/services.py`)
    - Duplicate detection.
    - Exclusion and scope checks.
    - Input schema validation with clear failure messages.

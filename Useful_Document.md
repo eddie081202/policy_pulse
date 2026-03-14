@@ -16,6 +16,23 @@ and returns per-line audit results:
 
 All amounts are represented in USD.
 
+## Code Structure (Entity + Service)
+
+Member C implementation is organized as:
+
+- `auditor/entities.py`
+  - Domain entities and data contracts (policy, bill, audit output)
+  - Includes `from_dict(...)` parsing helpers
+- `auditor/services.py`
+  - Core business services:
+    - semantic matching
+    - input validation
+    - duplicate detection
+    - exclusions and scope checks
+    - payout + deductible calculations
+- `auditor/models.py`, `auditor/matcher.py`, `auditor/engine.py`
+  - Backward-compatible re-export modules for legacy imports
+
 ## Locked JSON Contracts
 
 ### Policy Input (from Agent A)
