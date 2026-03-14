@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+from auditor.matcher import KeywordSemanticMatcher, MatchResult, SemanticMatcher
+from auditor.models import (
+    AppliedClause,
+    AuditResult,
+    AuditSummary,
+    Bill,
+    CoverageCategory,
+    LineAuditResult,
+    Policy,
+)
+
+
+def audit_invoice(
+    policy: Policy,
+    bill: Bill,
+    matcher: SemanticMatcher | None = None,
+) -> AuditResult:
+    active_matcher = matcher or KeywordSemanticMatcher()
+    duplicates = _detect_duplicates(bill)
+
+    line_results: list[LineAuditResult] = []
+    for line in bill.line_items:
+        if duplicates.get(line.id, False):
+            line_results.append(
+                LineAuditResult(
+                    line_id=line.id,
+                    item_name=line.item_name,
+                    matched_policy_category_id=None,
+                    status="warning",
+                    allowed_amount=0.0,
+                    patient_responsible_amount=round(line.total_cost, 2),
+                    flags=["duplicate"],
+                    applied_clauses=[],
+                    reason="Potential duplicate service line item detected; review required.",
+                    line_total_cost=round(line.total_cost, 2),
+                )
+            )
+            continue
+
+        match = active_matcher.match_line(line, bill, policy)
+        line_results.append(_evaluate_line(policy, bill, line, match))
+
+    _apply_invoice_deductible(policy, line_results)
+
+    summary = AuditSummary(
+        total_invoice_amount=round(sum(x.line_total_cost for x in line_results), 2),
+        total_approved=round(sum(x.allowed_amount for x in line_results), 2),
+        total_patient_responsible=round(
+            sum(x.patient_responsible_amount for x in line_results), 2
+        ),
+        currency="USD",
+        notes="All values are in USD. Deductible applied once per invoice.",
+    )
+    return AuditResult(line_results=line_results, summary=summary)
+
+
+def _evaluate_line(
+    policy: Policy,
+    bill: Bill,
+    line,
+    match: MatchResult,
+) -> LineAuditResult:
+    category = _get_category(policy, match.category_id)
+
+    if match.exclusion_id is not None:
+        exclusion = _get_exclusion_clause(policy, match.exclusion_id)
+        return LineAuditResult(
+            line_id=line.id,
+            item_name=line.item_name,
+            matched_policy_category_id=None,
+            status="rejected",
+            allowed_amount=0.0,
+            patient_responsible_amount=round(line.total_cost, 2),
+            flags=["excluded"],
+            applied_clauses=exclusion,
+            reason=f"Rejected because this item is excluded under policy terms. {match.reason}",
+            line_total_cost=round(line.total_cost, 2),
+        )
+
+    if category is None:
+        return LineAuditResult(
+            line_id=line.id,
+            item_name=line.item_name,
+            matched_policy_category_id=None,
+            status="rejected",
+            allowed_amount=0.0,
+            patient_responsible_amount=round(line.total_cost, 2),
+            flags=["not_covered"],
+            applied_clauses=[],
+            reason=f"Rejected because no policy category applies. {match.reason}",
+            line_total_cost=round(line.total_cost, 2),
+        )
+
+    if _is_out_of_scope(category.scope, bill.invoice_meta.diagnosis):
+        clause_refs = _to_applied_clauses(category)
+        return LineAuditResult(
+            line_id=line.id,
+            item_name=line.item_name,
+            matched_policy_category_id=category.id,
+            status="rejected",
+            allowed_amount=0.0,
+            patient_responsible_amount=round(line.total_cost, 2),
+            flags=["out_of_scope"],
+            applied_clauses=clause_refs,
+            reason=(
+                f"Rejected because '{category.name}' is accident-only, while diagnosis "
+                "does not look accident-related."
+            ),
+            line_total_cost=round(line.total_cost, 2),
+        )
+
+    line_total = float(line.total_cost)
+    capped_amount = line_total
+    flags: list[str] = []
+    status = "approved"
+
+    if category.per_item_limit is not None and line_total > category.per_item_limit:
+        capped_amount = category.per_item_limit
+        flags.append("over_limit")
+        status = "partial"
+
+    rate = category.coverage_rate if category.coverage_rate > 0 else policy.meta.coinsurance
+    allowed = round(max(0.0, capped_amount * rate), 2)
+    patient = round(max(0.0, line_total - allowed), 2)
+
+    # For uncertain semantic matches, downgrade to warning while preserving math.
+    if match.confidence < 0.5:
+        status = "warning"
+        flags.append("low_match_confidence")
+
+    reason = _build_reason(category, status, flags, match.reason)
+    return LineAuditResult(
+        line_id=line.id,
+        item_name=line.item_name,
+        matched_policy_category_id=category.id,
+        status=status,
+        allowed_amount=allowed,
+        patient_responsible_amount=patient,
+        flags=flags,
+        applied_clauses=_to_applied_clauses(category),
+        reason=reason,
+        line_total_cost=round(line_total, 2),
+    )
+
+
+def _build_reason(
+    category: CoverageCategory,
+    status: str,
+    flags: list[str],
+    match_reason: str,
+) -> str:
+    clause_id = category.clauses[0].id if category.clauses else "N/A"
+    if status == "approved":
+        return f"Approved under '{category.name}' (Clause {clause_id}). {match_reason}"
+    if status == "partial":
+        return (
+            f"Partially covered under '{category.name}' due to policy limits "
+            f"(Clause {clause_id}). {match_reason}"
+        )
+    if status == "warning":
+        return (
+            f"Coverage mapped to '{category.name}' but requires manual review "
+            f"(Clause {clause_id}). Flags: {', '.join(flags)}."
+        )
+    return f"Decision linked to '{category.name}' (Clause {clause_id})."
+
+
+def _detect_duplicates(bill: Bill) -> dict[str, bool]:
+    seen: set[tuple[str, float]] = set()
+    duplicates: dict[str, bool] = {}
+
+    for line in bill.line_items:
+        key = (_normalize_text(line.item_name), float(line.unit_cost))
+        if key in seen:
+            duplicates[line.id] = True
+        else:
+            duplicates[line.id] = False
+            seen.add(key)
+    return duplicates
+
+
+def _apply_invoice_deductible(policy: Policy, line_results: list[LineAuditResult]) -> None:
+    deductible = max(0.0, float(policy.meta.deductible))
+    if deductible <= 0:
+        return
+
+    eligible_lines = [
+        x
+        for x in line_results
+        if x.status in ("approved", "partial", "warning") and x.allowed_amount > 0
+    ]
+    raw_total = sum(x.allowed_amount for x in eligible_lines)
+    if raw_total <= 0:
+        return
+
+    if deductible >= raw_total:
+        for line in eligible_lines:
+            reduction = line.allowed_amount
+            line.patient_responsible_amount = round(
+                line.patient_responsible_amount + line.allowed_amount, 2
+            )
+            line.allowed_amount = 0.0
+            if line.status == "approved":
+                line.status = "partial"
+                line.reason = (
+                    "Partially covered after deductible adjustment at invoice level. "
+                    + line.reason
+                )
+            if reduction > 0 and "deductible_applied" not in line.flags:
+                line.flags.append("deductible_applied")
+        return
+
+    for line in eligible_lines:
+        share = line.allowed_amount / raw_total
+        reduction = round(deductible * share, 2)
+        line.allowed_amount = round(max(0.0, line.allowed_amount - reduction), 2)
+        line.patient_responsible_amount = round(line.line_total_cost - line.allowed_amount, 2)
+        if reduction > 0 and "deductible_applied" not in line.flags:
+            line.flags.append("deductible_applied")
+        if line.status == "approved":
+            line.status = "partial"
+            line.reason = (
+                "Partially covered after deductible adjustment at invoice level. "
+                + line.reason
+            )
+
+
+def _get_category(policy: Policy, category_id: str | None) -> CoverageCategory | None:
+    if category_id is None:
+        return None
+    for category in policy.coverage_categories:
+        if category.id == category_id:
+            return category
+    return None
+
+
+def _get_exclusion_clause(policy: Policy, exclusion_id: str) -> list[AppliedClause]:
+    for exclusion in policy.exclusions:
+        if exclusion.id == exclusion_id:
+            return [AppliedClause(id=x.id, snippet=x.text) for x in exclusion.clauses[:1]]
+    return []
+
+
+def _to_applied_clauses(category: CoverageCategory) -> list[AppliedClause]:
+    return [AppliedClause(id=x.id, snippet=x.text) for x in category.clauses[:1]]
+
+
+def _is_out_of_scope(scope: str, diagnosis: str) -> bool:
+    if scope.strip().lower() != "accident_only":
+        return False
+
+    diagnosis_text = _normalize_text(diagnosis)
+    accident_words = {"accident", "trauma", "injury", "collision", "fracture"}
+    return not any(word in diagnosis_text.split() for word in accident_words)
+
+
+def _normalize_text(value: str) -> str:
+    cleaned = []
+    for ch in value.lower():
+        cleaned.append(ch if ch.isalnum() else " ")
+    return " ".join("".join(cleaned).split())
