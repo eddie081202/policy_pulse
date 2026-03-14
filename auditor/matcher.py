@@ -27,8 +27,9 @@ class KeywordSemanticMatcher:
 
     def match_line(self, line_item: LineItem, bill: Bill, policy: Policy) -> MatchResult:
         item_text = _normalize(line_item.item_name)
+        item_tokens = set(item_text.split())
 
-        exclusion = _find_exclusion_match(item_text, policy.exclusions)
+        exclusion = _find_exclusion_match(item_tokens, policy.exclusions)
         if exclusion is not None:
             return MatchResult(
                 category_id=None,
@@ -65,10 +66,13 @@ class KeywordSemanticMatcher:
         )
 
 
-def _find_exclusion_match(item_text: str, exclusions: list[Exclusion]) -> Exclusion | None:
+def _find_exclusion_match(item_tokens: set[str], exclusions: list[Exclusion]) -> Exclusion | None:
     for exclusion in exclusions:
         corpus = _normalize(f"{exclusion.name} {exclusion.text}")
-        if _token_overlap_score(item_text, corpus) >= 1:
+        exclusion_tokens = set(corpus.split())
+        overlap_tokens = item_tokens & exclusion_tokens
+        # Reduce false positives by requiring stronger evidence for exclusions.
+        if _is_strong_exclusion_match(overlap_tokens):
             return exclusion
     return None
 
@@ -87,3 +91,24 @@ def _token_overlap_score(a: str, b: str) -> int:
     a_tokens = {t for t in a_tokens if len(t) > 1}
     b_tokens = {t for t in b_tokens if len(t) > 1}
     return len(a_tokens & b_tokens)
+
+
+def _is_strong_exclusion_match(overlap_tokens: set[str]) -> bool:
+    if not overlap_tokens:
+        return False
+    stopwords = {
+        "and",
+        "for",
+        "the",
+        "with",
+        "care",
+        "service",
+        "services",
+        "medical",
+        "hospital",
+        "treatment",
+    }
+    informative = {t for t in overlap_tokens if t not in stopwords}
+    if len(informative) >= 2:
+        return True
+    return any(len(t) >= 7 for t in informative)

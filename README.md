@@ -36,9 +36,19 @@ The Auditor Agent (`Member C`) is split into three clear layers:
 3. Decision + calculation engine (`auditor/engine.py`)
    - Duplicate detection.
    - Exclusion and scope checks.
+   - Input schema validation with clear failure messages.
    - Per-item policy limits and coverage-rate payout math.
    - Invoice-level deductible allocation.
    - Final line-item statuses and reason strings with clause references.
+
+## Fine-Tuning Notes
+
+Current baseline includes practical safeguards for hackathon demos:
+
+- Strict input validation before audit execution.
+- Duplicate detection prefers `item_code` when available.
+- Exclusion matching uses stronger token rules to reduce false positives.
+- Currency in output summary follows policy meta (USD required by this project).
 
 ## Processing Flow
 

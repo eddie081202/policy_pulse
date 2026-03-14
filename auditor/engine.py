@@ -17,6 +17,7 @@ def audit_invoice(
     bill: Bill,
     matcher: SemanticMatcher | None = None,
 ) -> AuditResult:
+    _validate_inputs(policy, bill)
     active_matcher = matcher or KeywordSemanticMatcher()
     duplicates = _detect_duplicates(bill)
 
@@ -50,8 +51,11 @@ def audit_invoice(
         total_patient_responsible=round(
             sum(x.patient_responsible_amount for x in line_results), 2
         ),
-        currency="USD",
-        notes="All values are in USD. Deductible applied once per invoice.",
+        currency=policy.meta.currency or "USD",
+        notes=(
+            f"All values are in {policy.meta.currency or 'USD'}. "
+            "Deductible applied once per invoice."
+        ),
     )
     return AuditResult(line_results=line_results, summary=summary)
 
@@ -172,7 +176,11 @@ def _detect_duplicates(bill: Bill) -> dict[str, bool]:
     duplicates: dict[str, bool] = {}
 
     for line in bill.line_items:
-        key = (_normalize_text(line.item_name), float(line.unit_cost))
+        code = (line.item_code or "").strip().lower()
+        if code:
+            key = (f"code:{code}", float(line.unit_cost))
+        else:
+            key = (_normalize_text(line.item_name), float(line.unit_cost))
         if key in seen:
             duplicates[line.id] = True
         else:
@@ -261,3 +269,32 @@ def _normalize_text(value: str) -> str:
     for ch in value.lower():
         cleaned.append(ch if ch.isalnum() else " ")
     return " ".join("".join(cleaned).split())
+
+
+def _validate_inputs(policy: Policy, bill: Bill) -> None:
+    errors: list[str] = []
+    if not policy.coverage_categories:
+        errors.append("policy.coverage_categories is required and cannot be empty")
+    if not bill.line_items:
+        errors.append("bill.line_items is required and cannot be empty")
+    if (policy.meta.currency or "").strip().upper() != "USD":
+        errors.append("policy.meta.currency must be 'USD' for this project")
+
+    for i, category in enumerate(policy.coverage_categories):
+        if not category.id:
+            errors.append(f"policy.coverage_categories[{i}].id is required")
+        if not category.name:
+            errors.append(f"policy.coverage_categories[{i}].name is required")
+        if category.coverage_rate < 0:
+            errors.append(f"policy.coverage_categories[{i}].coverage_rate must be >= 0")
+
+    for i, line in enumerate(bill.line_items):
+        if not line.item_name:
+            errors.append(f"bill.line_items[{i}].item_name is required")
+        if line.total_cost < 0:
+            errors.append(f"bill.line_items[{i}].total_cost must be >= 0")
+        if line.unit_cost < 0:
+            errors.append(f"bill.line_items[{i}].unit_cost must be >= 0")
+
+    if errors:
+        raise ValueError("Invalid auditor input: " + "; ".join(errors))
