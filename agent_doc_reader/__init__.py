@@ -1,6 +1,8 @@
-from .main import query_csv_contracts, query_pdf_contracts
+from .main import audit_document, query_contracts
+from .services import AuditResult
 
 __all__ = [
-    "query_csv_contracts",
-    "query_pdf_contracts",
+    "query_contracts",
+    "audit_document",
+    "AuditResult",
 ]

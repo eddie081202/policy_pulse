@@ -1,34 +1,95 @@
+import base64
 import json
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal, Optional
 
 import pandas as pd
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pydantic import BaseModel
 
-try:
-    from langchain_community.document_loaders import PyPDFLoader
-except ImportError:
-    from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 
 from ..entities.agent_doc_reader_entity import AgentDocReaderEntity
 from .base_service import BaseService
 
 _SKIP_VALUES = {"n/a", "nan", "", "none"}
 
+_IMAGE_MIME = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "bmp": "image/bmp",
+}
+
+class _ContractFields(BaseModel):
+    contract_id: Optional[str] = None
+    policy_number: Optional[str] = None
+    contract_type: Optional[str] = None
+    coverage_category: Optional[str] = None
+    inpatient_covered: Optional[str] = None
+    outpatient_covered: Optional[str] = None
+    dental_covered: Optional[str] = None
+    exclusions: Optional[str] = None
+    deductible_individual: Optional[str] = None
+    copay_primary_care: Optional[str] = None
+    premium_monthly: Optional[str] = None
+
+
+from pydantic import BaseModel, Field
+
+
+class _AuditLLMOutput(BaseModel):
+    discrepancies: list[str] = Field(
+        description=(
+            "List of discrepancies found between the uploaded contract and the best-matching "
+            "knowledge base contract. Each item must be a plain human-readable sentence string, "
+            "e.g. 'Deductible is $2,000 in the upload but $1,000 in the knowledge base.' "
+            "Return an empty list if no discrepancies are found."
+        )
+    )
+    audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"] = Field(
+        description=(
+            "PASS if the uploaded contract hit > 70% matches a knowledge base contract. "
+            "FAIL if it cannot hit 70% confidence score from all knowledge base contracts. "
+            "NEEDS_REVIEW if uncertain."
+        )
+    )
+    explanation: str = Field(
+        description="A concise narrative explanation of the audit decision."
+    )
+    confidence: float = Field(
+        description="Confidence score between 0.0 and 1.0."
+    )
+
+
+class AuditResult(BaseModel):
+    file_name: str
+    file_type: Literal["pdf", "image"]
+    document_type: Literal["contract", "unknown"]
+    extracted_fields: dict
+    matched_context: str
+    discrepancies: list[str]
+    audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    explanation: str
+    confidence: float
+
 
 class AgentDocReaderService(BaseService):
     def __init__(self, entity: AgentDocReaderEntity):
         super().__init__(entity)
-        self._chain = None
-        self._pdf_chain = None
+        self._merged_retriever = None
+        self._unified_chain = None
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -52,60 +113,198 @@ class AgentDocReaderService(BaseService):
             documents.append(Document(page_content=text, metadata=metadata))
         return documents
 
-    def _get_chain(self):
-        if self._chain is not None:
-            return self._chain
+    def _get_unified_chain(self):
+        """Build and cache a single RAG chain that merges the CSV and PDF vectorstores."""
+        if self._unified_chain is not None:
+            return self._unified_chain
 
         os.environ["OPENAI_API_KEY"] = self.entity.api_key
+        merged_retriever = self._get_merged_retriever()
+        prompt = ChatPromptTemplate.from_template(self.entity.system_prompt)
 
+        self._unified_chain = (
+            {
+                "context": merged_retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
+                "question": RunnablePassthrough(),
+            }
+            | prompt
+            | ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+            | StrOutputParser()
+        )
+        return self._unified_chain
+
+    def _get_merged_retriever(self):
+        """Build and cache the merged retriever (CSV + PDF) with no LLM step."""
+        if self._merged_retriever is not None:
+            return self._merged_retriever
+
+        os.environ["OPENAI_API_KEY"] = self.entity.api_key
         embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
-        vectorstore = Chroma(
+
+        csv_retriever = Chroma(
             collection_name=self.entity.collection_name,
             embedding_function=embeddings,
             persist_directory=self.entity.csv_vectorstore_path,
-        )
-        retriever = vectorstore.as_retriever(search_kwargs={"k": self.entity.k})
+        ).as_retriever(search_kwargs={"k": self.entity.k})
 
-        prompt = ChatPromptTemplate.from_template(self.entity.system_prompt)
-
-        self._chain = (
-            {
-                "context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
-                "question": RunnablePassthrough(),
-            }
-            | prompt
-            | ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
-            | StrOutputParser()
-        )
-        return self._chain
-
-    def _get_pdf_chain(self):
-        """Build and cache the RAG chain for PDF queries."""
-        if self._pdf_chain is not None:
-            return self._pdf_chain
-
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-
-        embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
-        vectorstore = Chroma(
+        pdf_retriever = Chroma(
             collection_name=self.entity.pdf_collection_name,
             embedding_function=embeddings,
             persist_directory=self.entity.pdf_vectorstore_path,
-        )
-        retriever = vectorstore.as_retriever(search_kwargs={"k": self.entity.k})
+        ).as_retriever(search_kwargs={"k": self.entity.k})
 
-        prompt = ChatPromptTemplate.from_template(self.entity.system_prompt)
+        def _merge(query: str) -> list[Document]:
+            return csv_retriever.invoke(query) + pdf_retriever.invoke(query)
 
-        self._pdf_chain = (
-            {
-                "context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
-                "question": RunnablePassthrough(),
-            }
-            | prompt
-            | ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
-            | StrOutputParser()
+        self._merged_retriever = RunnableLambda(_merge)
+        return self._merged_retriever
+
+    # ------------------------------------------------------------------
+    # Audit private helpers
+    # ------------------------------------------------------------------
+
+    def _ingest_file(self, file_path: str) -> tuple[str, str]:
+        """Extract text from a PDF or image file.
+
+        Returns:
+            Tuple of (extracted_text, file_type) where file_type is 'pdf' or 'image'.
+        """
+        suffix = Path(file_path).suffix.lstrip(".").lower()
+
+        if suffix == "pdf":
+            pages = PyPDFLoader(file_path).load()
+            text = "\n\n".join(p.page_content for p in pages)
+            return text, "pdf"
+
+        mime = _IMAGE_MIME.get(suffix)
+        if mime is None:
+            raise ValueError(f"Unsupported file type: .{suffix}")
+
+        os.environ["OPENAI_API_KEY"] = self.entity.api_key
+        b64 = base64.b64encode(Path(file_path).read_bytes()).decode()
+        message = HumanMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": (
+                        "Transcribe all text visible in this insurance document image. "
+                        "Preserve all field names, values, dates, and numbers exactly."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                },
+            ]
         )
-        return self._pdf_chain
+        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+        return llm.invoke([message]).content, "image"
+
+    def _extract_fields(self, text: str) -> dict:
+        """Extract structured contract fields from raw text."""
+        os.environ["OPENAI_API_KEY"] = self.entity.api_key
+        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+        structured_llm = llm.with_structured_output(_ContractFields, method="function_calling")
+        prompt = (
+            "Extract the following fields from this insurance contract. "
+            "If a field is not present, leave it as null.\n\n"
+            f"{text}"
+        )
+        result: _ContractFields = structured_llm.invoke(prompt)
+        return result.model_dump()
+
+    def _exact_pdf_lookup(self, policy_number: str) -> list[str]:
+        """Direct text search in pdf_chunks.jsonl for a specific policy number.
+
+        Semantic search is unreliable for exact identifiers. This guarantees
+        we find the document if it exists in the knowledge base.
+        """
+        jsonl_path = Path(self.entity.pdf_chunks_path)
+        if not jsonl_path.exists():
+            return []
+        matches = []
+        with jsonl_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                row = line.strip()
+                if not row:
+                    continue
+                record = json.loads(row)
+                if policy_number in record.get("text", ""):
+                    matches.append(record["text"])
+        return matches
+
+    def _cross_reference(self, extracted_fields: dict) -> str:
+        """Retrieve matching contract records from the knowledge base.
+
+        Priority 1 — exact policy number lookup directly in the JSONL (deterministic).
+        Priority 2 — semantic retrieval from both vectorstores for broader context.
+        """
+        sections: list[str] = []
+
+        # Priority 1: exact match by policy number
+        policy_number = extracted_fields.get("policy_number")
+        if policy_number:
+            exact_chunks = self._exact_pdf_lookup(policy_number)
+            if exact_chunks:
+                header = f"=== EXACT MATCH (policy number: {policy_number}) ==="
+                sections.append(header + "\n\n" + "\n\n---\n\n".join(exact_chunks))
+
+        # Priority 2: semantic retrieval
+        parts = []
+        for key in ("contract_type", "coverage_category", "policy_number", "contract_id"):
+            val = extracted_fields.get(key)
+            if val:
+                parts.append(f"{key.replace('_', ' ')} {val}")
+        parts.append("deductible copay exclusions coverage terms")
+        query = " ".join(parts)
+        docs: list[Document] = self._get_merged_retriever().invoke(query)
+        if docs:
+            sections.append(
+                "=== SEMANTIC RESULTS ===\n\n"
+                + "\n\n---\n\n".join(doc.page_content for doc in docs)
+            )
+
+        return "\n\n" + ("=" * 60) + "\n\n".join(sections)
+
+    def _run_audit(
+        self,
+        file_name: str,
+        file_type: str,
+        extracted_fields: dict,
+        context: str,
+    ) -> "AuditResult":
+        """Ask the LLM to compare the uploaded contract against existing data."""
+        os.environ["OPENAI_API_KEY"] = self.entity.api_key
+        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+        structured_llm = llm.with_structured_output(_AuditLLMOutput, method="function_calling")
+
+        prompt = (
+            "You are an expert insurance contract analyst.\n\n"
+            "STEP 1 — Find the best match: From the knowledge base documents below, identify the single "
+            "contract that most closely matches the uploaded contract (prioritise: policy number, "
+            "contract type, deductible, and premium).\n\n"
+            "STEP 2 — Compare: Compare the uploaded contract fields only against that best-matching "
+            "contract. List only genuine discrepancies between the two.\n\n"
+            "STEP 3 — Verdict (choose exactly one):\n"
+            "  • PASS — the uploaded contract's key fields (policy number, contract type, deductible, "
+            "premium) match the best-matching knowledge base contract closely. Output has > 70% confidence.\n"
+            "  • FAIL — the uploaded contract cannot hit 70% confidence score from all knowledge base contracts.\n"
+            "  • NEEDS_REVIEW — partial match, or insufficient data to decide confidently.\n\n"
+            f"Uploaded Contract Fields:\n{json.dumps(extracted_fields, indent=2)}\n\n"
+            f"Knowledge Base Contracts (retrieved):\n{context}"
+        )
+        llm_output: _AuditLLMOutput = structured_llm.invoke(prompt)
+        return AuditResult(
+            file_name=file_name,
+            file_type=file_type,
+            document_type="contract",
+            extracted_fields=extracted_fields,
+            matched_context=context,
+            discrepancies=llm_output.discrepancies,
+            audit_verdict=llm_output.audit_verdict,
+            explanation=llm_output.explanation,
+            confidence=llm_output.confidence,
+        )
 
     # ------------------------------------------------------------------
     # Public interface
@@ -128,18 +327,32 @@ class AgentDocReaderService(BaseService):
         documents = self._transform_csv()
         vectorstore.add_documents(documents)
 
-    def query(self, question: str) -> str:
+    def query_contracts(self, question: str) -> str:
+        """Query the unified contracts vectorstore (CSV + PDF) and return a natural language answer."""
         self.initialize_csv_vectorstore()
-        return self._get_chain().invoke(question)
-
-    def query_pdf(self, question: str) -> str:
-        """Query the PDF vectorstore and return a natural language answer."""
-        # Ensure vectorstore is initialized before querying
         if not Path(self.entity.pdf_vectorstore_path).exists():
             self.transform_pdf_for_rag()
             self.initialize_pdf_vectorstore()
-        
-        return self._get_pdf_chain().invoke(question)
+        return self._get_unified_chain().invoke(question)
+
+    def audit_document(self, file_path: str) -> AuditResult:
+        """Ingest a user-uploaded contract file (PDF or image) and audit it against existing contracts.
+
+        Args:
+            file_path: Absolute path to the uploaded PDF or image file.
+
+        Returns:
+            AuditResult with extracted fields, matched context, discrepancies, and verdict.
+        """
+        self.initialize_csv_vectorstore()
+        if not Path(self.entity.pdf_vectorstore_path).exists():
+            self.transform_pdf_for_rag()
+            self.initialize_pdf_vectorstore()
+
+        text, file_type = self._ingest_file(file_path)
+        extracted = self._extract_fields(text)
+        context = self._cross_reference(extracted)
+        return self._run_audit(Path(file_path).name, file_type, extracted, context)
 
     # ------------------------------------------------------------------
     # PDF Transformation: Load → Chunk → Serialize to JSONL
@@ -147,7 +360,7 @@ class AgentDocReaderService(BaseService):
 
     def transform_pdf_for_rag(self) -> tuple[int, int, int]:
         """Transform PDF documents into chunked JSONL records.
-        
+
         Returns:
             Tuple of (pdf_count, page_count, chunk_count)
         """
@@ -166,12 +379,12 @@ class AgentDocReaderService(BaseService):
 
         self._ensure_output_dir()
         total_chunks = self._save_jsonl(self._build_records(chunks))
-        
+
         return len(pdf_files), len(all_pages), total_chunks
 
     def initialize_pdf_vectorstore(self) -> int:
         """Initialize Chroma vectorstore from PDF chunks.
-        
+
         Returns:
             Count of vectors created
         """
@@ -180,7 +393,7 @@ class AgentDocReaderService(BaseService):
 
         os.environ["OPENAI_API_KEY"] = self.entity.api_key
         embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
-        
+
         vectorstore = Chroma.from_texts(
             texts=texts,
             embedding=embeddings,
@@ -189,7 +402,7 @@ class AgentDocReaderService(BaseService):
             collection_name=self.entity.pdf_collection_name,
             persist_directory=self.entity.pdf_vectorstore_path,
         )
-        
+
         return len(texts)
 
     # ------------------------------------------------------------------
