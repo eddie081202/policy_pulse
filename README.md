@@ -29,17 +29,17 @@ The Auditor Agent (`Member C`) is implemented in an agent-centric style:
 1. Agent entities (`auditor/entities/`)
    - `BaseAgentEntity` stores generic agent metadata/state.
    - `AuditorAgentEntity` stores Auditor-specific attributes (currency, thresholds, behavior).
-2. Input/Output contracts (`auditor/entities/`)
-   - Parses raw JSON from Policy Agent and Bill Vision Agent into typed objects.
-   - Defines stable output schema for frontend rendering.
+2. Input/Output contracts (`auditor/entities/auditor_agent_entity.py`)
+   - Keeps agent-owned payload contracts and conversion helpers in one place.
+   - Defines stable input/output schema for frontend rendering.
 3. Agent services (`auditor/services/`)
    - `BaseAgentService` defines service-level execution contract.
    - `AuditorAgentService` orchestrates end-to-end execution for this agent entity.
-4. Semantic matching (`auditor/services/`)
+4. Semantic matching (`auditor/services/auditor_agent_service.py`)
    - Uses a pluggable `SemanticMatcher` interface.
    - Current implementation is keyword-based for offline demo reliability.
    - Can be replaced with an LLM-backed matcher without touching payout logic.
-5. Decision + calculation engine (`auditor/services/`)
+5. Decision + calculation engine (`auditor/services/auditor_agent_service.py`)
    - Duplicate detection.
    - Exclusion and scope checks.
    - Input schema validation with clear failure messages.
@@ -54,19 +54,11 @@ auditor/
   entities/
     base_agent_entity.py
     auditor_agent_entity.py
-    base_entity.py
-    policy_entity.py
-    bill_entity.py
-    audit_result_entity.py
-    __init__.py     # export all entity contracts
+    __init__.py     # export all agent-owned contracts
   services/
     base_agent_service.py
     auditor_agent_service.py
-    base_service.py
-    matcher_service.py
-    validation_service.py
-    audit_service.py
-    __init__.py     # export audit entrypoints
+    __init__.py     # export agent service entrypoints
   models.py        # Compatibility re-export -> entities/
   matcher.py       # Compatibility re-export -> services/
   engine.py        # Compatibility re-export -> services/

@@ -24,13 +24,13 @@ Member C implementation is organized as:
   - Agent entities:
     - `base_agent_entity.py`
     - `auditor_agent_entity.py`
-  - Domain entities and data contracts (policy, bill, audit output)
+  - Agent-owned contracts and data attributes (policy, bill, audit output)
   - Includes `from_dict(...)` parsing helpers
 - `auditor/services/`
   - Agent services:
     - `base_agent_service.py`
     - `auditor_agent_service.py`
-  - Core business services:
+  - Core business logic for this specific agent:
     - semantic matching
     - input validation
     - duplicate detection
@@ -46,18 +46,10 @@ auditor/
   entities/
     base_agent_entity.py
     auditor_agent_entity.py
-    base_entity.py
-    policy_entity.py
-    bill_entity.py
-    audit_result_entity.py
     __init__.py
   services/
     base_agent_service.py
     auditor_agent_service.py
-    base_service.py
-    matcher_service.py
-    validation_service.py
-    audit_service.py
     __init__.py
   models.py        -> compatibility layer (re-export entities)
   matcher.py       -> compatibility layer (re-export matcher services)
