@@ -2,9 +2,8 @@
 
 import base64
 import json
-import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import requests
 
@@ -80,11 +79,19 @@ class AgentReadingBillsService(BaseService):
             
             # Extract service information
             service_info = self._extract_service_info(llm_response)
-            
-            # Format output as JSON
-            formatted_output = self._format_output_json(service_info)
-            
-            return formatted_output
+
+            if "error" in service_info:
+                return service_info
+
+            # Redact personal information and append redaction notes
+            redacted_data = self._redact_personal_info(service_info)
+
+            if "error" in redacted_data:
+                return redacted_data
+
+            redacted_data["redaction_notes"] = self._build_redaction_notes(redacted_data)
+
+            return redacted_data
             
         except Exception as e:
             return self._handle_error(e, "read_bill")
@@ -317,37 +324,6 @@ class AgentReadingBillsService(BaseService):
             for i, item in enumerate(obj):
                 if isinstance(item, (dict, list)):
                     self._redact_dict(item, redaction_fields, depth + 1)
-    
-    def _format_output_json(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Redact personal information and add redaction notes to the extracted data.
-        
-        The LLM already returns the complete schema with all required fields.
-        This function handles redaction and adds documentation of what was masked.
-        
-        Args:
-            data (Dict): Extracted service information from LLM
-        
-        Returns:
-            Dict: Data with personal information redacted and notes added
-        """
-        try:
-            if "error" in data:
-                return data
-            
-            # Redact personal information
-            redacted_data = self._redact_personal_info(data)
-            
-            if "error" in redacted_data:
-                return redacted_data
-            
-            # Add redaction notes
-            redacted_data["redaction_notes"] = self._build_redaction_notes(redacted_data)
-            
-            return redacted_data
-            
-        except Exception as e:
-            return self._handle_error(e, "_format_output_json")
     
     def _build_redaction_notes(self, data: Dict[str, Any]) -> list:
         """

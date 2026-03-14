@@ -1,0 +1,158 @@
+{
+  "service_information": "Dental Benefits Explanation",
+  "service_type": "insurance",
+  "bill_type": "Dental",
+  "bill_status": "Paid",
+  "provider": "Cedars-Sinai Medical Center",
+  "claim_information": {
+    "invoice_number": "[REDACTED]",
+    "claim_number": "CLM-2024-397061",
+    "policy_number": "POL-2021-506102",
+    "contract_number": null,
+    "authorization_number": null,
+    "eob_number": "EOB-2024-95653"
+  },
+  "service_dates": {
+    "service_start": "2024-04-11",
+    "service_end": "2024-04-11",
+    "billing_period": "April 2024",
+    "claim_submitted": "2024-04-21",
+    "claim_processed": "2024-05-01",
+    "eob_date": null
+  },
+  "member_info": {
+    "plan_name": null,
+    "plan_type": "Dental",
+    "group_number": null,
+    "relationship": "Self",
+    "coverage_type": null
+  },
+  "provider_info": {
+    "provider_type": "Clinic",
+    "network_status": "In-Network",
+    "place_of_service_code": null
+  },
+  "diagnosis_codes": [],
+  "procedure_line_items": [
+    {
+      "code": "D2140",
+      "description": "Amalgam restoration",
+      "units": 1,
+      "amount_billed": 145.0,
+      "allowed_amount": 127.6,
+      "adjustment_amount": null,
+      "deductible_applied": 0.0,
+      "copay_amount": 29.0,
+      "coinsurance_amount": null,
+      "patient_responsibility": 29.0,
+      "service_date": "2024-04-11"
+    },
+    {
+      "code": "D0120",
+      "description": "Periodic oral eval",
+      "units": 1,
+      "amount_billed": 62.0,
+      "allowed_amount": 54.56,
+      "adjustment_amount": null,
+      "deductible_applied": 0.0,
+      "copay_amount": 12.4,
+      "coinsurance_amount": null,
+      "patient_responsibility": 12.4,
+      "service_date": "2024-04-11"
+    },
+    {
+      "code": "D1110",
+      "description": "Prophylaxis - adult",
+      "units": 1,
+      "amount_billed": 99.0,
+      "allowed_amount": 87.12,
+      "adjustment_amount": null,
+      "deductible_applied": 0.0,
+      "copay_amount": 19.8,
+      "coinsurance_amount": null,
+      "patient_responsibility": 19.8,
+      "service_date": "2024-04-11"
+    }
+  ],
+  "payment_summary": [
+    {
+      "description": "Total Billed Amount",
+      "amount": 306.0
+    },
+    {
+      "description": "Contractual Adjustment",
+      "amount": -36.72
+    },
+    {
+      "description": "Allowed Amount",
+      "amount": null
+    },
+    {
+      "description": "Deductible Applied",
+      "amount": 0.0
+    },
+    {
+      "description": "Copay",
+      "amount": null
+    },
+    {
+      "description": "Coinsurance",
+      "amount": null
+    },
+    {
+      "description": "Insurance Paid",
+      "amount": 215.42
+    },
+    {
+      "description": "Patient Responsibility",
+      "amount": 53.86
+    },
+    {
+      "description": "Amount Patient Paid",
+      "amount": null
+    },
+    {
+      "description": "Balance Due",
+      "amount": 53.86
+    }
+  ],
+  "claim_summary": {
+    "total_billed": 306.0,
+    "total_allowed": null,
+    "total_adjustments": -36.72,
+    "deductible_applied": 0.0,
+    "copays": null,
+    "coinsurance": null,
+    "insurance_paid": 215.42,
+    "patient_responsibility": 53.86,
+    "amount_patient_paid": null,
+    "balance_due": 53.86
+  },
+  "claim_status_info": {
+    "status": "Paid",
+    "denial_reason": null,
+    "denial_code": null,
+    "appeal_deadline": null,
+    "adjustment_code": null,
+    "adjustment_reason": null
+  },
+  "payment_details": {
+    "payment_date": null,
+    "payment_method": null,
+    "check_number": null,
+    "payment_amount": null,
+    "outstanding_balance": null
+  },
+  "billing_period": {
+    "start_date": "2024-04-11",
+    "end_date": "2024-04-11"
+  },
+  "additional_details": [
+    "Preventive services covered at 100% - no deductible.",
+    "Annual maximum: $2,000 individual.",
+    "Claim processed: 2024-05-01."
+  ],
+  "redaction_notes": [
+    "Redacted fields: invoice_number"
+  ]
+}
