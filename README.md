@@ -72,6 +72,7 @@ auditor/
 - Main agent-centric entity: `auditor.entities.AuditorAgentEntity`
 - Main matcher interface: `auditor.services.SemanticMatcher`
 - Default matcher implementation: `auditor.services.KeywordSemanticMatcher`
+- Optional LLM matcher: `auditor.services.LLMSemanticMatcher`
 
 ## Fine-Tuning Notes
 
@@ -81,6 +82,17 @@ Current baseline includes practical safeguards for hackathon demos:
 - Duplicate detection prefers `item_code` when available.
 - Exclusion matching uses stronger token rules to reduce false positives.
 - Currency in output summary follows policy meta (USD required by this project).
+- LLM matcher is optional and automatically falls back to keyword matcher if API config is missing or fails.
+
+### Enable LLM Matcher (Optional)
+
+To use LLM semantic matching while keeping the same flow:
+
+1. Set `AuditorAgentEntity.matcher_name = "LLMSemanticMatcher"`.
+2. Configure model settings on the entity (`llm_model`, `llm_base_url`, `llm_api_key_env`).
+3. Export your API key in the environment variable specified by `llm_api_key_env` (default: `OPENAI_API_KEY`).
+
+If the LLM call fails at runtime, the system falls back to `KeywordSemanticMatcher` automatically.
 
 ## Processing Flow
 

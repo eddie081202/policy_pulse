@@ -61,6 +61,7 @@ auditor/
 - `AuditorAgentService.execute(...)`: agent-centric entrypoint (`policy_json`, `bill_json`)
 - `audit_invoice(...)`: top-level orchestration for one invoice
 - `KeywordSemanticMatcher`: default semantic matcher (replaceable by LLM)
+- `LLMSemanticMatcher`: optional LLM matcher with automatic keyword fallback
 - `_validate_inputs(...)`: schema/data guardrails
 - `_detect_duplicates(...)`: duplicate line-item detection
 - `_evaluate_line(...)`: per-line decision (status + amounts + reasons)
@@ -260,7 +261,7 @@ Use this as the final gate before demo day.
 
 ### C4 - Nice-to-have fine tuning
 
-- [ ] Replace keyword matcher with LLM matcher (keep keyword fallback).
+- [ ] Enable built-in `LLMSemanticMatcher` via `AuditorAgentEntity.matcher_name` (keep keyword fallback).
 - [ ] Add confidence threshold and manual-review path.
 - [ ] Improve duplicate logic with item code + fuzzy name matching.
 - [ ] Tighten exclusion matching to reduce false positives.

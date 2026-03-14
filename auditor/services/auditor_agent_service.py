@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+import json
+import os
+from typing import Any, Protocol
+from urllib import error, request
 
 from auditor.entities import (
     AppliedClause,
@@ -78,6 +81,161 @@ class KeywordSemanticMatcher:
         )
 
 
+class LLMSemanticMatcher:
+    """
+    Optional LLM matcher with keyword fallback.
+    Uses an OpenAI-compatible chat completions endpoint.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        api_key_env: str,
+        timeout_seconds: int = 20,
+        temperature: float = 0.0,
+        fallback_matcher: KeywordSemanticMatcher | None = None,
+    ) -> None:
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.api_key_env = api_key_env
+        self.timeout_seconds = timeout_seconds
+        self.temperature = temperature
+        self.fallback_matcher = fallback_matcher or KeywordSemanticMatcher()
+
+    def match_line(self, line_item: LineItem, bill: Bill, policy: Policy) -> MatchResult:
+        api_key = os.getenv(self.api_key_env, "")
+        if not api_key:
+            fallback = self.fallback_matcher.match_line(line_item, bill, policy)
+            return MatchResult(
+                category_id=fallback.category_id,
+                exclusion_id=fallback.exclusion_id,
+                confidence=fallback.confidence,
+                reason=(
+                    f"{fallback.reason} LLM disabled because "
+                    f"environment variable '{self.api_key_env}' is not set."
+                ),
+            )
+
+        try:
+            llm_response = self._call_llm(
+                api_key=api_key,
+                line_item=line_item,
+                bill=bill,
+                policy=policy,
+            )
+            parsed = self._parse_llm_response(llm_response, policy)
+            return parsed
+        except Exception as exc:
+            fallback = self.fallback_matcher.match_line(line_item, bill, policy)
+            return MatchResult(
+                category_id=fallback.category_id,
+                exclusion_id=fallback.exclusion_id,
+                confidence=fallback.confidence,
+                reason=f"{fallback.reason} LLM fallback triggered: {exc}",
+            )
+
+    def _call_llm(self, api_key: str, line_item: LineItem, bill: Bill, policy: Policy) -> str:
+        categories = [
+            {
+                "id": c.id,
+                "name": c.name,
+                "description": c.description,
+                "scope": c.scope,
+                "coverage_rate": c.coverage_rate,
+            }
+            for c in policy.coverage_categories
+        ]
+        exclusions = [
+            {"id": e.id, "name": e.name, "text": e.text}
+            for e in policy.exclusions
+        ]
+        payload = {
+            "model": self.model,
+            "temperature": self.temperature,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an insurance claim semantic matching engine. "
+                        "Return only JSON with keys: category_id, exclusion_id, confidence, reason. "
+                        "If no match, set category_id to null. "
+                        "If excluded, set exclusion_id to the best exclusion id."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "policy": {
+                                "categories": categories,
+                                "exclusions": exclusions,
+                            },
+                            "invoice_context": {
+                                "diagnosis": bill.invoice_meta.diagnosis,
+                                "visit_reason": bill.invoice_meta.visit_reason,
+                            },
+                            "line_item": {
+                                "item_name": line_item.item_name,
+                                "item_code": line_item.item_code,
+                                "category_hint": line_item.category_hint,
+                                "quantity": line_item.quantity,
+                                "unit_cost": line_item.unit_cost,
+                                "total_cost": line_item.total_cost,
+                            },
+                        }
+                    ),
+                },
+            ],
+        }
+
+        raw_payload = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            url=f"{self.base_url}/chat/completions",
+            data=raw_payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                body = resp.read().decode("utf-8")
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"LLM HTTP error {exc.code}: {body}") from exc
+
+        data = json.loads(body)
+        return str(data["choices"][0]["message"]["content"])
+
+    def _parse_llm_response(self, content: str, policy: Policy) -> MatchResult:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError("LLM response does not contain a JSON object")
+
+        parsed = json.loads(content[start : end + 1])
+        category_id = parsed.get("category_id")
+        exclusion_id = parsed.get("exclusion_id")
+        confidence = _safe_float(parsed.get("confidence", 0.5), default=0.5)
+        reason = str(parsed.get("reason", "LLM semantic match result"))
+
+        valid_category_ids = {c.id for c in policy.coverage_categories}
+        valid_exclusion_ids = {e.id for e in policy.exclusions}
+        if category_id is not None and category_id not in valid_category_ids:
+            raise ValueError(f"Invalid category_id from LLM: {category_id}")
+        if exclusion_id is not None and exclusion_id not in valid_exclusion_ids:
+            raise ValueError(f"Invalid exclusion_id from LLM: {exclusion_id}")
+
+        return MatchResult(
+            category_id=category_id,
+            exclusion_id=exclusion_id,
+            confidence=max(0.0, min(1.0, confidence)),
+            reason=reason,
+        )
+
+
 class AuditorAgentService(BaseAgentService):
     def __init__(
         self,
@@ -85,7 +243,7 @@ class AuditorAgentService(BaseAgentService):
         matcher: SemanticMatcher | None = None,
     ) -> None:
         super().__init__(entity=entity)
-        self.matcher = matcher
+        self.matcher = matcher or self._build_matcher()
 
     @property
     def agent(self) -> AuditorAgentEntity:
@@ -117,6 +275,18 @@ class AuditorAgentService(BaseAgentService):
             low_match_confidence_threshold=self.agent.low_match_confidence_threshold,
             duplicate_status=self.agent.duplicate_handling,
         )
+
+    def _build_matcher(self) -> SemanticMatcher:
+        if self.agent.matcher_name == "LLMSemanticMatcher":
+            return LLMSemanticMatcher(
+                model=self.agent.llm_model,
+                base_url=self.agent.llm_base_url,
+                api_key_env=self.agent.llm_api_key_env,
+                timeout_seconds=self.agent.llm_timeout_seconds,
+                temperature=self.agent.llm_temperature,
+                fallback_matcher=KeywordSemanticMatcher(),
+            )
+        return KeywordSemanticMatcher()
 
 
 def audit_invoice(
@@ -478,3 +648,10 @@ def _is_strong_exclusion_match(overlap_tokens: set[str]) -> bool:
 
 def _resolve_duplicate_status(status: str) -> str:
     return status if status in {"warning", "rejected"} else "warning"
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default

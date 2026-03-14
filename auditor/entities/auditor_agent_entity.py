@@ -206,6 +206,11 @@ class AuditorAgentEntity(BaseAgentEntity):
     duplicate_handling: DuplicateHandling = "warning"
     strict_currency_check: bool = True
     matcher_name: str = "KeywordSemanticMatcher"
+    llm_model: str = "gpt-4o-mini"
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key_env: str = "OPENAI_API_KEY"
+    llm_timeout_seconds: int = 20
+    llm_temperature: float = 0.0
     last_summary: dict[str, Any] = field(default_factory=dict)
 
     @classmethod

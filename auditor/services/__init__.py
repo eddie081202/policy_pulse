@@ -1,6 +1,7 @@
 from auditor.services.auditor_agent_service import (
     AuditorAgentService,
     KeywordSemanticMatcher,
+    LLMSemanticMatcher,
     MatchResult,
     SemanticMatcher,
     audit_invoice,
@@ -12,6 +13,7 @@ __all__ = [
     "AuditorAgentService",
     "BaseAgentService",
     "KeywordSemanticMatcher",
+    "LLMSemanticMatcher",
     "MatchResult",
     "SemanticMatcher",
 ]
