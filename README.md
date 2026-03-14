@@ -16,8 +16,8 @@ All examples and calculations in this project use USD.
 
 This repo now includes a hackathon-ready Auditor scaffold:
 
-- `auditor/entities.py`: domain entities (policy, bill, and audit result contracts).
-- `auditor/services.py`: matching + decision services (semantic match, validation, payout logic).
+- `auditor/entities/`: domain entities (policy, bill, and audit result contracts).
+- `auditor/services/`: matching + decision services (semantic match, validation, payout logic).
 - `auditor/models.py`, `auditor/matcher.py`, `auditor/engine.py`: compatibility re-export modules.
 - `auditor/sample_data.py`: sample policy and bill payloads in USD.
 - `run_auditor_demo.py`: local smoke test that prints audit JSON.
@@ -26,14 +26,14 @@ This repo now includes a hackathon-ready Auditor scaffold:
 
 The Auditor Agent (`Member C`) is split into three clear layers:
 
-1. Input/Output contracts (`auditor/entities.py`)
+1. Input/Output contracts (`auditor/entities/`)
    - Parses raw JSON from Policy Agent and Bill Vision Agent into typed objects.
    - Defines stable output schema for frontend rendering.
-2. Semantic matching (`auditor/services.py`)
+2. Semantic matching (`auditor/services/`)
    - Uses a pluggable `SemanticMatcher` interface.
    - Current implementation is keyword-based for offline demo reliability.
    - Can be replaced with an LLM-backed matcher without touching payout logic.
-3. Decision + calculation engine (`auditor/services.py`)
+3. Decision + calculation engine (`auditor/services/`)
    - Duplicate detection.
    - Exclusion and scope checks.
    - Input schema validation with clear failure messages.
@@ -45,11 +45,21 @@ The Auditor Agent (`Member C`) is split into three clear layers:
 
 ```text
 auditor/
-  entities.py      # Domain entities and JSON contracts
-  services.py      # Business logic + matcher + audit orchestration
-  models.py        # Compatibility re-export -> entities.py
-  matcher.py       # Compatibility re-export -> services.py
-  engine.py        # Compatibility re-export -> services.py
+  entities/
+    base_entity.py
+    policy_entity.py
+    bill_entity.py
+    audit_result_entity.py
+    __init__.py     # export all entity contracts
+  services/
+    base_service.py
+    matcher_service.py
+    validation_service.py
+    audit_service.py
+    __init__.py     # export audit entrypoints
+  models.py        # Compatibility re-export -> entities/
+  matcher.py       # Compatibility re-export -> services/
+  engine.py        # Compatibility re-export -> services/
   sample_data.py   # Demo policy/bill payloads
 ```
 

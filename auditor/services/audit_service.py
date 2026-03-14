@@ -1,79 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
-
 from auditor.entities import (
     AppliedClause,
     AuditResult,
     AuditSummary,
     Bill,
     CoverageCategory,
-    Exclusion,
     LineAuditResult,
     LineItem,
     Policy,
 )
-
-
-@dataclass
-class MatchResult:
-    category_id: str | None
-    exclusion_id: str | None
-    confidence: float
-    reason: str
-
-
-class SemanticMatcher(Protocol):
-    def match_line(self, line_item: LineItem, bill: Bill, policy: Policy) -> MatchResult:
-        ...
-
-
-class KeywordSemanticMatcher:
-    """
-    Fast deterministic matcher for hackathon scaffolding.
-    Replace this with an LLM-backed matcher when API keys are ready.
-    """
-
-    def match_line(self, line_item: LineItem, bill: Bill, policy: Policy) -> MatchResult:
-        item_text = _normalize(line_item.item_name)
-        item_tokens = set(item_text.split())
-
-        exclusion = _find_exclusion_match(item_tokens, policy.exclusions)
-        if exclusion is not None:
-            return MatchResult(
-                category_id=None,
-                exclusion_id=exclusion.id,
-                confidence=0.95,
-                reason=f"Item matches exclusion: {exclusion.name}.",
-            )
-
-        best_category_id = None
-        best_score = -1
-        for category in policy.coverage_categories:
-            candidate_text = _normalize(
-                f"{category.name} {category.description} {line_item.category_hint}"
-            )
-            score = _token_overlap_score(item_text, candidate_text)
-            if score > best_score:
-                best_score = score
-                best_category_id = category.id
-
-        if best_category_id is None or best_score <= 0:
-            return MatchResult(
-                category_id=None,
-                exclusion_id=None,
-                confidence=0.2,
-                reason="No strong policy category match found.",
-            )
-
-        confidence = min(0.99, 0.45 + (best_score * 0.15))
-        return MatchResult(
-            category_id=best_category_id,
-            exclusion_id=None,
-            confidence=confidence,
-            reason=f"Best keyword similarity match score: {best_score}.",
-        )
+from auditor.services.base_service import MatchResult, SemanticMatcher
+from auditor.services.matcher_service import KeywordSemanticMatcher
+from auditor.services.validation_service import validate_audit_inputs
 
 
 def audit_invoice(
@@ -81,7 +20,7 @@ def audit_invoice(
     bill: Bill,
     matcher: SemanticMatcher | None = None,
 ) -> AuditResult:
-    _validate_inputs(policy, bill)
+    validate_audit_inputs(policy, bill)
     active_matcher = matcher or KeywordSemanticMatcher()
     duplicates = _detect_duplicates(bill)
 
@@ -328,78 +267,8 @@ def _is_out_of_scope(scope: str, diagnosis: str) -> bool:
     return not any(word in diagnosis_text.split() for word in accident_words)
 
 
-def _validate_inputs(policy: Policy, bill: Bill) -> None:
-    errors: list[str] = []
-    if not policy.coverage_categories:
-        errors.append("policy.coverage_categories is required and cannot be empty")
-    if not bill.line_items:
-        errors.append("bill.line_items is required and cannot be empty")
-    if (policy.meta.currency or "").strip().upper() != "USD":
-        errors.append("policy.meta.currency must be 'USD' for this project")
-
-    for i, category in enumerate(policy.coverage_categories):
-        if not category.id:
-            errors.append(f"policy.coverage_categories[{i}].id is required")
-        if not category.name:
-            errors.append(f"policy.coverage_categories[{i}].name is required")
-        if category.coverage_rate < 0:
-            errors.append(f"policy.coverage_categories[{i}].coverage_rate must be >= 0")
-
-    for i, line in enumerate(bill.line_items):
-        if not line.item_name:
-            errors.append(f"bill.line_items[{i}].item_name is required")
-        if line.total_cost < 0:
-            errors.append(f"bill.line_items[{i}].total_cost must be >= 0")
-        if line.unit_cost < 0:
-            errors.append(f"bill.line_items[{i}].unit_cost must be >= 0")
-
-    if errors:
-        raise ValueError("Invalid auditor input: " + "; ".join(errors))
-
-
-def _find_exclusion_match(item_tokens: set[str], exclusions: list[Exclusion]) -> Exclusion | None:
-    for exclusion in exclusions:
-        corpus = _normalize(f"{exclusion.name} {exclusion.text}")
-        exclusion_tokens = set(corpus.split())
-        overlap_tokens = item_tokens & exclusion_tokens
-        # Reduce false positives by requiring stronger evidence for exclusions.
-        if _is_strong_exclusion_match(overlap_tokens):
-            return exclusion
-    return None
-
-
-def _token_overlap_score(a: str, b: str) -> int:
-    a_tokens = set(a.split())
-    b_tokens = set(b.split())
-    # Keep short medical acronyms like CT/MRI while still removing single letters.
-    a_tokens = {t for t in a_tokens if len(t) > 1}
-    b_tokens = {t for t in b_tokens if len(t) > 1}
-    return len(a_tokens & b_tokens)
-
-
 def _normalize(value: str) -> str:
     cleaned = []
     for ch in value.lower():
         cleaned.append(ch if ch.isalnum() else " ")
     return " ".join("".join(cleaned).split())
-
-
-def _is_strong_exclusion_match(overlap_tokens: set[str]) -> bool:
-    if not overlap_tokens:
-        return False
-    stopwords = {
-        "and",
-        "for",
-        "the",
-        "with",
-        "care",
-        "service",
-        "services",
-        "medical",
-        "hospital",
-        "treatment",
-    }
-    informative = {t for t in overlap_tokens if t not in stopwords}
-    if len(informative) >= 2:
-        return True
-    return any(len(t) >= 7 for t in informative)
