@@ -41,6 +41,24 @@ The Auditor Agent (`Member C`) is split into three clear layers:
    - Invoice-level deductible allocation.
    - Final line-item statuses and reason strings with clause references.
 
+### Current Module Map
+
+```text
+auditor/
+  entities.py      # Domain entities and JSON contracts
+  services.py      # Business logic + matcher + audit orchestration
+  models.py        # Compatibility re-export -> entities.py
+  matcher.py       # Compatibility re-export -> services.py
+  engine.py        # Compatibility re-export -> services.py
+  sample_data.py   # Demo policy/bill payloads
+```
+
+### Service Entry Points
+
+- Main public function: `auditor.services.audit_invoice(policy, bill, matcher=None)`
+- Main matcher interface: `auditor.services.SemanticMatcher`
+- Default matcher implementation: `auditor.services.KeywordSemanticMatcher`
+
 ## Fine-Tuning Notes
 
 Current baseline includes practical safeguards for hackathon demos:

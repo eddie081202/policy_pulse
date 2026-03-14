@@ -33,6 +33,26 @@ Member C implementation is organized as:
 - `auditor/models.py`, `auditor/matcher.py`, `auditor/engine.py`
   - Backward-compatible re-export modules for legacy imports
 
+### Quick architecture map
+
+```text
+auditor/
+  entities.py      -> all entities and data contracts
+  services.py      -> all business services and audit pipeline
+  models.py        -> compatibility layer (re-export entities)
+  matcher.py       -> compatibility layer (re-export matcher services)
+  engine.py        -> compatibility layer (re-export audit service)
+```
+
+### Responsibility split inside `services.py`
+
+- `audit_invoice(...)`: top-level orchestration for one invoice
+- `KeywordSemanticMatcher`: default semantic matcher (replaceable by LLM)
+- `_validate_inputs(...)`: schema/data guardrails
+- `_detect_duplicates(...)`: duplicate line-item detection
+- `_evaluate_line(...)`: per-line decision (status + amounts + reasons)
+- `_apply_invoice_deductible(...)`: invoice-level deductible allocation
+
 ## Locked JSON Contracts
 
 ### Policy Input (from Agent A)
