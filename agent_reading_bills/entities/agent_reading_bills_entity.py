@@ -8,8 +8,8 @@ _ROOT = Path(__file__).parent.parent.parent
 class AgentReadingBillsEntity(BaseEntity):
     def __init__(
         self,
-        llm_model_name: str = "gpt-4.1-mini",
-        vision_model_name: str = "gpt-4.1-mini",
+        llm_model_name: str = "gemini-2.0-flash",
+        vision_model_name: str = "gemini-2.0-flash",
         api_key: str = None,
         document_type: str = "bill",
         csv_path: str = None,

@@ -221,7 +221,7 @@ def visualize(
         Override the Chroma collection name. Defaults to
         ``AgentDocReaderEntity.collection_name``.
     """
-    # Resolve defaults lazily to avoid importing OpenAI at module load time
+    # Resolve defaults lazily to avoid importing Gemini clients at module load time
     if vectorstore_path is None or collection_name is None:
         try:
             from .entities.agent_doc_reader_entity import AgentDocReaderEntity

@@ -8,8 +8,8 @@ _ROOT = Path(__file__).parent.parent.parent
 class AgentDocReaderEntity(BaseEntity):
     def __init__(
         self,
-        llm_model_name: str = "gpt-5-mini",
-        embedding_model_name: str = "text-embedding-3-small",
+        llm_model_name: str = "gemini-2.5-flash",
+        embedding_model_name: str = "text-embedding-004",
         api_key: str = None,
         # CSV configuration
         csv_path: str = None,

@@ -13,7 +13,7 @@ class BaseEntity:
     ):
         if api_key is None:
             load_dotenv(Path(__file__).parent.parent.parent / ".env")
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = os.getenv("GEMINI_API_KEY")
 
         self.llm_model_name = llm_model_name
         self.embedding_model_name = embedding_model_name

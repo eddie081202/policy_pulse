@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-from openai import OpenAI
+from langchain_core.messages import HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from pypdf import PdfReader
 
@@ -89,16 +90,34 @@ class DocumentReadResult(BaseModel):
 class AgentReadingBillsService(BaseService):
     def __init__(self, entity: AgentReadingBillsEntity):
         super().__init__(entity)
-        self._client: OpenAI | None = None
+        self._llm_cache: dict[str, ChatGoogleGenerativeAI] = {}
 
     # ------------------------------------------------------------------
     # Client
     # ------------------------------------------------------------------
 
-    def _get_client(self) -> OpenAI:
-        if self._client is None:
-            self._client = OpenAI(api_key=self.entity.api_key)
-        return self._client
+    def _get_llm(self, model_name: str) -> ChatGoogleGenerativeAI:
+        if model_name not in self._llm_cache:
+            self._llm_cache[model_name] = ChatGoogleGenerativeAI(
+                model=model_name,
+                temperature=0,
+                google_api_key=self.entity.api_key,
+            )
+        return self._llm_cache[model_name]
+
+    def _response_text(self, response: Any) -> str:
+        content = getattr(response, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+            return "\n".join(p for p in parts if p).strip()
+        return str(content).strip()
 
     # ------------------------------------------------------------------
     # Extraction
@@ -120,26 +139,24 @@ class AgentReadingBillsService(BaseService):
     def _extract_image_text(self, file_path: Path) -> str:
         mime = _IMAGE_MIME[file_path.suffix.lower()]
         b64 = base64.b64encode(file_path.read_bytes()).decode("utf-8")
-        client = self._get_client()
-        response = client.responses.create(
-            model=self.entity.vision_model_name,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
+        llm = self._get_llm(self.entity.vision_model_name)
+        response = llm.invoke(
+            [
+                HumanMessage(
+                    content=[
                         {
-                            "type": "input_text",
+                            "type": "text",
                             "text": "Extract all visible text from this document image exactly as written.",
                         },
                         {
-                            "type": "input_image",
+                            "type": "image_url",
                             "image_url": f"data:{mime};base64,{b64}",
                         },
-                    ],
-                }
-            ],
+                    ]
+                )
+            ]
         )
-        return self._normalize_text(response.output_text)
+        return self._normalize_text(self._response_text(response))
 
     def extract_text(self, file_path: str) -> tuple[str, str]:
         """Extract raw text from a PDF or image file.
@@ -223,17 +240,19 @@ Document text:
 {text}
 """
 
-        client = self._get_client()
-        completion = client.chat.completions.create(
-            model=self.entity.llm_model_name,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+        llm = self._get_llm(self.entity.llm_model_name)
+        response = llm.invoke(
+            [
+                HumanMessage(
+                    content=(
+                        f"{system_prompt}\n\n"
+                        "Return ONLY one valid JSON object with no markdown wrappers.\n\n"
+                        f"{user_prompt}"
+                    )
+                )
+            ]
         )
-        content = completion.choices[0].message.content or "{}"
+        content = self._response_text(response) or "{}"
         return self._parse_json_payload(content)
 
     # ------------------------------------------------------------------

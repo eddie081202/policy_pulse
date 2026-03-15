@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 import re
 from pathlib import Path
 from typing import Iterable, Literal, Optional
@@ -12,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel
 
@@ -127,6 +126,19 @@ class AgentDocReaderService(BaseService):
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _build_llm(self) -> ChatGoogleGenerativeAI:
+        return ChatGoogleGenerativeAI(
+            model=self.entity.llm_model_name,
+            temperature=0,
+            google_api_key=self.entity.api_key,
+        )
+
+    def _build_embeddings(self) -> GoogleGenerativeAIEmbeddings:
+        return GoogleGenerativeAIEmbeddings(
+            model=self.entity.embedding_model_name,
+            google_api_key=self.entity.api_key,
+        )
+
     def _transform_csv(self) -> list[Document]:
         df = pd.read_csv(self.entity.csv_path)
         documents = []
@@ -151,7 +163,6 @@ class AgentDocReaderService(BaseService):
         if self._unified_chain is not None:
             return self._unified_chain
 
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
         retriever = self._get_retriever()
         prompt = ChatPromptTemplate.from_template(self.entity.system_prompt)
 
@@ -161,7 +172,7 @@ class AgentDocReaderService(BaseService):
                 "question": RunnablePassthrough(),
             }
             | prompt
-            | ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+            | self._build_llm()
             | StrOutputParser()
         )
         return self._unified_chain
@@ -172,12 +183,10 @@ class AgentDocReaderService(BaseService):
         When *category* is provided, results are filtered to that category's PDF
         documents plus all CSV rows. The unfiltered retriever is cached.
         """
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-
         if category is None and self._retriever is not None:
             return self._retriever
 
-        embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
+        embeddings = self._build_embeddings()
 
         search_kwargs: dict = {"k": self.entity.k}
         if category is not None:
@@ -217,7 +226,6 @@ class AgentDocReaderService(BaseService):
         if mime is None:
             raise ValueError(f"Unsupported file type: .{suffix}")
 
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
         b64 = base64.b64encode(Path(file_path).read_bytes()).decode()
         message = HumanMessage(
             content=[
@@ -230,18 +238,17 @@ class AgentDocReaderService(BaseService):
                 },
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "image_url": f"data:{mime};base64,{b64}",
                 },
             ]
         )
-        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
+        llm = self._build_llm()
         return llm.invoke([message]).content, "image"
 
     def _extract_fields(self, text: str) -> dict:
         """Extract structured contract fields from raw text."""
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
-        structured_llm = llm.with_structured_output(_ContractFields, method="function_calling")
+        llm = self._build_llm()
+        structured_llm = llm.with_structured_output(_ContractFields)
         prompt = (
             "Extract the following fields from this insurance contract. "
             "If a field is not present, leave it as null.\n\n"
@@ -417,9 +424,8 @@ class AgentDocReaderService(BaseService):
         docs: list[Document],
     ) -> "AuditResult":
         """Ask the LLM to compare the uploaded contract against all retrieved knowledge-base documents."""
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-        llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
-        structured_llm = llm.with_structured_output(_AuditLLMOutput, method="function_calling")
+        llm = self._build_llm()
+        structured_llm = llm.with_structured_output(_AuditLLMOutput)
 
         context = (
             "=== RETRIEVED KNOWLEDGE BASE CONTRACTS ===\n\n"
@@ -479,8 +485,7 @@ class AgentDocReaderService(BaseService):
         Returns:
             Total number of vectors in the collection.
         """
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-        embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
+        embeddings = self._build_embeddings()
         vectorstore = Chroma(
             collection_name=self.entity.collection_name,
             embedding_function=embeddings,
