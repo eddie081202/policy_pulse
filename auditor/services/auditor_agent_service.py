@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 from typing import Any, Protocol
@@ -27,12 +26,20 @@ from auditor.entities import (
 from auditor.services.base_agent_service import BaseAgentService
 
 
-@dataclass
 class MatchResult:
-    category_id: str | None
-    exclusion_id: str | None
-    confidence: float
-    reason: str
+    __slots__ = ("category_id", "exclusion_id", "confidence", "reason")
+
+    def __init__(
+        self,
+        category_id: str | None,
+        exclusion_id: str | None,
+        confidence: float,
+        reason: str,
+    ) -> None:
+        self.category_id = category_id
+        self.exclusion_id = exclusion_id
+        self.confidence = confidence
+        self.reason = reason
 
 
 class SemanticMatcher(Protocol):
@@ -279,7 +286,7 @@ class AuditorAgentService(BaseAgentService):
         try:
             policy = Policy.from_dict(policy_json)
             bill = Bill.from_dict(bill_json)
-            resolved_similar_json = _resolve_similar_policy_json_inputs(
+            resolved_similar_json = self.resolve_similar_policy_json_inputs(
                 direct_policy_jsons=similar_policies_json,
                 vector_refs=similar_policy_vectors,
                 resolver=self.similar_policy_resolver,
@@ -322,7 +329,7 @@ class AuditorAgentService(BaseAgentService):
         similar_policies: list[Policy] | None = None,
         user_preference: str | None = None,
     ) -> AuditResult:
-        return _audit_invoice(
+        return self.audit_invoice(
             policy=policy,
             bill=bill,
             similar_policies=similar_policies,
@@ -344,6 +351,169 @@ class AuditorAgentService(BaseAgentService):
             )
         return KeywordSemanticMatcher()
 
+    @staticmethod
+    def resolve_similar_policy_json_inputs(
+        direct_policy_jsons: list[dict] | None,
+        vector_refs: list[dict] | None,
+        resolver: SimilarPolicyResolver | None,
+    ) -> list[dict]:
+        merged: list[dict] = list(direct_policy_jsons or [])
+        if not vector_refs:
+            return merged
+
+        if resolver is None:
+            raise ValueError(
+                "Received similar_policy_vectors but no similar_policy_resolver is configured. "
+                "Provide AuditorAgentService(similar_policy_resolver=...) to pull policies from DB."
+            )
+
+        resolved = resolver.resolve(vector_refs)
+        if not isinstance(resolved, list):
+            raise ValueError(
+                "similar_policy_resolver.resolve(...) must return a list of policy JSON objects."
+            )
+
+        for index, raw in enumerate(resolved):
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    f"Resolved similar policy at index {index} is not a JSON object/dict."
+                )
+            merged.append(raw)
+        return merged
+
+    def audit_invoice(
+        self,
+        policy: Policy,
+        bill: Bill,
+        matcher: SemanticMatcher | None = None,
+        low_match_confidence_threshold: float | None = None,
+        duplicate_status: str | None = None,
+        similar_policies: list[Policy] | None = None,
+        user_preference: str | None = None,
+    ) -> AuditResult:
+        resolved_matcher = matcher or self.matcher
+        resolved_threshold = (
+            low_match_confidence_threshold
+            if low_match_confidence_threshold is not None
+            else self.agent.low_match_confidence_threshold
+        )
+        resolved_duplicate_status = (
+            duplicate_status
+            if duplicate_status is not None
+            else self.agent.duplicate_handling
+        )
+        return self._audit_invoice(
+            policy=policy,
+            bill=bill,
+            similar_policies=similar_policies,
+            user_preference=user_preference,
+            matcher=resolved_matcher,
+            low_match_confidence_threshold=resolved_threshold,
+            duplicate_status=resolved_duplicate_status,
+        )
+
+    @staticmethod
+    def _audit_invoice(
+        policy: Policy,
+        bill: Bill,
+        similar_policies: list[Policy] | None = None,
+        user_preference: str | None = None,
+        matcher: SemanticMatcher | None = None,
+        low_match_confidence_threshold: float = 0.5,
+        duplicate_status: str = "warning",
+    ) -> AuditResult:
+        _validate_inputs(policy, bill)
+        for candidate in similar_policies or []:
+            _validate_inputs(candidate, bill)
+
+        active_matcher = matcher or KeywordSemanticMatcher()
+        line_results, summary, utilization_report = AuditorAgentService._audit_policy_core(
+            policy=policy,
+            bill=bill,
+            matcher=active_matcher,
+            low_match_confidence_threshold=low_match_confidence_threshold,
+            duplicate_status=duplicate_status,
+        )
+
+        policy_comparison_report = None
+        if similar_policies:
+            policy_comparison_report = _build_policy_comparison_report(
+                base_policy=policy,
+                similar_policies=similar_policies,
+                bill=bill,
+                matcher=active_matcher,
+                low_match_confidence_threshold=low_match_confidence_threshold,
+                duplicate_status=duplicate_status,
+                base_summary=summary,
+                base_utilization_report=utilization_report,
+                user_preference=user_preference,
+            )
+
+        return AuditResult(
+            line_results=line_results,
+            summary=summary,
+            utilization_report=utilization_report,
+            policy_comparison_report=policy_comparison_report,
+        )
+
+    @staticmethod
+    def _audit_policy_core(
+        policy: Policy,
+        bill: Bill,
+        matcher: SemanticMatcher,
+        low_match_confidence_threshold: float,
+        duplicate_status: str,
+    ) -> tuple[list[LineAuditResult], AuditSummary, UtilizationReport]:
+        duplicates = _detect_duplicates(bill)
+        resolved_duplicate_status = _resolve_duplicate_status(duplicate_status)
+
+        line_results: list[LineAuditResult] = []
+        for line in bill.line_items:
+            if duplicates.get(line.id, False):
+                line_results.append(
+                    LineAuditResult(
+                        line_id=line.id,
+                        item_name=line.item_name,
+                        matched_policy_category_id=None,
+                        status=resolved_duplicate_status,
+                        allowed_amount=0.0,
+                        patient_responsible_amount=round(line.total_cost, 2),
+                        flags=["duplicate"],
+                        applied_clauses=[],
+                        reason="Potential duplicate service line item detected; review required.",
+                        line_total_cost=round(line.total_cost, 2),
+                    )
+                )
+                continue
+
+            match = matcher.match_line(line, bill, policy)
+            line_results.append(
+                _evaluate_line(
+                    policy=policy,
+                    bill=bill,
+                    line=line,
+                    match=match,
+                    low_match_confidence_threshold=low_match_confidence_threshold,
+                )
+            )
+
+        _apply_invoice_deductible(policy, line_results)
+
+        summary = AuditSummary(
+            total_invoice_amount=round(sum(x.line_total_cost for x in line_results), 2),
+            total_approved=round(sum(x.allowed_amount for x in line_results), 2),
+            total_patient_responsible=round(
+                sum(x.patient_responsible_amount for x in line_results), 2
+            ),
+            currency=policy.meta.currency or "USD",
+            notes=(
+                f"All values are in {policy.meta.currency or 'USD'}. "
+                "Deductible applied once per invoice."
+            ),
+        )
+        utilization_report = _build_utilization_report(policy=policy, line_results=line_results)
+        return line_results, summary, utilization_report
+
 
 def audit_invoice(
     policy: Policy,
@@ -354,7 +524,7 @@ def audit_invoice(
     similar_policies: list[Policy] | None = None,
     user_preference: str | None = None,
 ) -> AuditResult:
-    return _audit_invoice(
+    return AuditorAgentService._audit_invoice(
         policy=policy,
         bill=bill,
         similar_policies=similar_policies,
@@ -363,136 +533,6 @@ def audit_invoice(
         low_match_confidence_threshold=low_match_confidence_threshold,
         duplicate_status=duplicate_status,
     )
-
-
-def _audit_invoice(
-    policy: Policy,
-    bill: Bill,
-    similar_policies: list[Policy] | None = None,
-    user_preference: str | None = None,
-    matcher: SemanticMatcher | None = None,
-    low_match_confidence_threshold: float = 0.5,
-    duplicate_status: str = "warning",
-) -> AuditResult:
-    _validate_inputs(policy, bill)
-    for candidate in similar_policies or []:
-        _validate_inputs(candidate, bill)
-
-    active_matcher = matcher or KeywordSemanticMatcher()
-    line_results, summary, utilization_report = _audit_policy_core(
-        policy=policy,
-        bill=bill,
-        matcher=active_matcher,
-        low_match_confidence_threshold=low_match_confidence_threshold,
-        duplicate_status=duplicate_status,
-    )
-
-    policy_comparison_report = None
-    if similar_policies:
-        policy_comparison_report = _build_policy_comparison_report(
-            base_policy=policy,
-            similar_policies=similar_policies,
-            bill=bill,
-            matcher=active_matcher,
-            low_match_confidence_threshold=low_match_confidence_threshold,
-            duplicate_status=duplicate_status,
-            base_summary=summary,
-            base_utilization_report=utilization_report,
-            user_preference=user_preference,
-        )
-
-    return AuditResult(
-        line_results=line_results,
-        summary=summary,
-        utilization_report=utilization_report,
-        policy_comparison_report=policy_comparison_report,
-    )
-
-
-def _audit_policy_core(
-    policy: Policy,
-    bill: Bill,
-    matcher: SemanticMatcher,
-    low_match_confidence_threshold: float,
-    duplicate_status: str,
-) -> tuple[list[LineAuditResult], AuditSummary, UtilizationReport]:
-    duplicates = _detect_duplicates(bill)
-    resolved_duplicate_status = _resolve_duplicate_status(duplicate_status)
-
-    line_results: list[LineAuditResult] = []
-    for line in bill.line_items:
-        if duplicates.get(line.id, False):
-            line_results.append(
-                LineAuditResult(
-                    line_id=line.id,
-                    item_name=line.item_name,
-                    matched_policy_category_id=None,
-                    status=resolved_duplicate_status,
-                    allowed_amount=0.0,
-                    patient_responsible_amount=round(line.total_cost, 2),
-                    flags=["duplicate"],
-                    applied_clauses=[],
-                    reason="Potential duplicate service line item detected; review required.",
-                    line_total_cost=round(line.total_cost, 2),
-                )
-            )
-            continue
-
-        match = matcher.match_line(line, bill, policy)
-        line_results.append(
-            _evaluate_line(
-                policy=policy,
-                bill=bill,
-                line=line,
-                match=match,
-                low_match_confidence_threshold=low_match_confidence_threshold,
-            )
-        )
-
-    _apply_invoice_deductible(policy, line_results)
-
-    summary = AuditSummary(
-        total_invoice_amount=round(sum(x.line_total_cost for x in line_results), 2),
-        total_approved=round(sum(x.allowed_amount for x in line_results), 2),
-        total_patient_responsible=round(
-            sum(x.patient_responsible_amount for x in line_results), 2
-        ),
-        currency=policy.meta.currency or "USD",
-        notes=(
-            f"All values are in {policy.meta.currency or 'USD'}. "
-            "Deductible applied once per invoice."
-        ),
-    )
-    utilization_report = _build_utilization_report(policy=policy, line_results=line_results)
-    return line_results, summary, utilization_report
-
-
-def _resolve_similar_policy_json_inputs(
-    direct_policy_jsons: list[dict] | None,
-    vector_refs: list[dict] | None,
-    resolver: SimilarPolicyResolver | None,
-) -> list[dict]:
-    merged: list[dict] = list(direct_policy_jsons or [])
-    if not vector_refs:
-        return merged
-
-    if resolver is None:
-        raise ValueError(
-            "Received similar_policy_vectors but no similar_policy_resolver is configured. "
-            "Provide AuditorAgentService(similar_policy_resolver=...) to pull policies from DB."
-        )
-
-    resolved = resolver.resolve(vector_refs)
-    if not isinstance(resolved, list):
-        raise ValueError("similar_policy_resolver.resolve(...) must return a list of policy JSON objects.")
-
-    for index, raw in enumerate(resolved):
-        if not isinstance(raw, dict):
-            raise ValueError(
-                f"Resolved similar policy at index {index} is not a JSON object/dict."
-            )
-        merged.append(raw)
-    return merged
 
 
 def _evaluate_line(
@@ -968,12 +1008,14 @@ def _build_policy_comparison_report(
         (base_policy, base_summary, base_utilization_report)
     ]
     for candidate in similar_policies:
-        _, candidate_summary, candidate_utilization_report = _audit_policy_core(
+        _, candidate_summary, candidate_utilization_report = (
+            AuditorAgentService._audit_policy_core(
             policy=candidate,
             bill=bill,
             matcher=matcher,
             low_match_confidence_threshold=low_match_confidence_threshold,
             duplicate_status=duplicate_status,
+        )
         )
         evaluated_options.append((candidate, candidate_summary, candidate_utilization_report))
 

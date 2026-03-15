@@ -1,9 +1,9 @@
 """
 Backward-compatible engine exports.
 
-Primary service definitions now live in `auditor.services`.
+Primary invocation lives in `auditor.main`.
 """
 
-from auditor.services import audit_invoice
+from auditor.main import audit_invoice
 
 __all__ = ["audit_invoice"]
