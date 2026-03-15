@@ -2,7 +2,7 @@ import json
 
 from auditor.entities import AuditorAgentEntity
 from auditor.services import AuditorAgentService
-from auditor.sample_data import SAMPLE_BILL, SAMPLE_POLICY
+from auditor.sample_data import SAMPLE_BILL, SAMPLE_POLICY, SAMPLE_SIMILAR_POLICIES
 
 
 def main() -> None:
@@ -14,7 +14,12 @@ def main() -> None:
     agent_entity.llm_timeout_seconds = 20
     agent_entity.llm_temperature = 0.0
     agent_service = AuditorAgentService(entity=agent_entity)
-    result = agent_service.execute(policy_json=SAMPLE_POLICY, bill_json=SAMPLE_BILL)
+    result = agent_service.execute(
+        policy_json=SAMPLE_POLICY,
+        bill_json=SAMPLE_BILL,
+        similar_policies_json=SAMPLE_SIMILAR_POLICIES,
+        user_preference="price",
+    )
     print(json.dumps(result.to_dict(), indent=2))
 
 

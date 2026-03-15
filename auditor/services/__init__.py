@@ -4,6 +4,7 @@ from auditor.services.auditor_agent_service import (
     LLMSemanticMatcher,
     MatchResult,
     SemanticMatcher,
+    SimilarPolicyResolver,
     audit_invoice,
 )
 from auditor.services.base_agent_service import BaseAgentService
@@ -16,4 +17,5 @@ __all__ = [
     "LLMSemanticMatcher",
     "MatchResult",
     "SemanticMatcher",
+    "SimilarPolicyResolver",
 ]

@@ -17,6 +17,9 @@ from auditor.entities import (
     Exclusion,
     LineAuditResult,
     LineItem,
+    PolicyPreference,
+    PolicyComparisonReport,
+    PolicyOptionScore,
     Policy,
     UpgradeRecommendation,
     UtilizationReport,
@@ -34,6 +37,16 @@ class MatchResult:
 
 class SemanticMatcher(Protocol):
     def match_line(self, line_item: LineItem, bill: Bill, policy: Policy) -> MatchResult:
+        ...
+
+
+class SimilarPolicyResolver(Protocol):
+    """
+    Adapter interface for pulling similar policy JSON records from vector references.
+    Implement this in your DB/vector integration layer.
+    """
+
+    def resolve(self, vector_refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ...
 
 
@@ -244,20 +257,42 @@ class AuditorAgentService(BaseAgentService):
         self,
         entity: AuditorAgentEntity,
         matcher: SemanticMatcher | None = None,
+        similar_policy_resolver: SimilarPolicyResolver | None = None,
     ) -> None:
         super().__init__(entity=entity)
         self.matcher = matcher or self._build_matcher()
+        self.similar_policy_resolver = similar_policy_resolver
 
     @property
     def agent(self) -> AuditorAgentEntity:
         return self.entity
 
-    def execute(self, policy_json: dict, bill_json: dict) -> AuditResult:
+    def execute(
+        self,
+        policy_json: dict,
+        bill_json: dict,
+        similar_policies_json: list[dict] | None = None,
+        similar_policy_vectors: list[dict] | None = None,
+        user_preference: str | None = None,
+    ) -> AuditResult:
         self.agent.mark_running()
         try:
             policy = Policy.from_dict(policy_json)
             bill = Bill.from_dict(bill_json)
-            result = self.execute_from_entities(policy=policy, bill=bill)
+            resolved_similar_json = _resolve_similar_policy_json_inputs(
+                direct_policy_jsons=similar_policies_json,
+                vector_refs=similar_policy_vectors,
+                resolver=self.similar_policy_resolver,
+            )
+            similar_policies = [
+                Policy.from_dict(raw_policy) for raw_policy in resolved_similar_json
+            ]
+            result = self.execute_from_entities(
+                policy=policy,
+                bill=bill,
+                similar_policies=similar_policies,
+                user_preference=user_preference,
+            )
             self.agent.mark_completed()
             self.agent.last_summary = {
                 "total_invoice_amount": result.summary.total_invoice_amount,
@@ -269,16 +304,29 @@ class AuditorAgentService(BaseAgentService):
                     if result.utilization_report is not None
                     else None
                 ),
+                "best_policy": (
+                    result.policy_comparison_report.best_policy_name
+                    if result.policy_comparison_report is not None
+                    else None
+                ),
             }
             return result
         except Exception as exc:  # pragma: no cover - defensive path
             self.agent.mark_failed(str(exc))
             raise
 
-    def execute_from_entities(self, policy: Policy, bill: Bill) -> AuditResult:
+    def execute_from_entities(
+        self,
+        policy: Policy,
+        bill: Bill,
+        similar_policies: list[Policy] | None = None,
+        user_preference: str | None = None,
+    ) -> AuditResult:
         return _audit_invoice(
             policy=policy,
             bill=bill,
+            similar_policies=similar_policies,
+            user_preference=user_preference,
             matcher=self.matcher,
             low_match_confidence_threshold=self.agent.low_match_confidence_threshold,
             duplicate_status=self.agent.duplicate_handling,
@@ -303,10 +351,14 @@ def audit_invoice(
     matcher: SemanticMatcher | None = None,
     low_match_confidence_threshold: float = 0.5,
     duplicate_status: str = "warning",
+    similar_policies: list[Policy] | None = None,
+    user_preference: str | None = None,
 ) -> AuditResult:
     return _audit_invoice(
         policy=policy,
         bill=bill,
+        similar_policies=similar_policies,
+        user_preference=user_preference,
         matcher=matcher,
         low_match_confidence_threshold=low_match_confidence_threshold,
         duplicate_status=duplicate_status,
@@ -316,12 +368,54 @@ def audit_invoice(
 def _audit_invoice(
     policy: Policy,
     bill: Bill,
+    similar_policies: list[Policy] | None = None,
+    user_preference: str | None = None,
     matcher: SemanticMatcher | None = None,
     low_match_confidence_threshold: float = 0.5,
     duplicate_status: str = "warning",
 ) -> AuditResult:
     _validate_inputs(policy, bill)
+    for candidate in similar_policies or []:
+        _validate_inputs(candidate, bill)
+
     active_matcher = matcher or KeywordSemanticMatcher()
+    line_results, summary, utilization_report = _audit_policy_core(
+        policy=policy,
+        bill=bill,
+        matcher=active_matcher,
+        low_match_confidence_threshold=low_match_confidence_threshold,
+        duplicate_status=duplicate_status,
+    )
+
+    policy_comparison_report = None
+    if similar_policies:
+        policy_comparison_report = _build_policy_comparison_report(
+            base_policy=policy,
+            similar_policies=similar_policies,
+            bill=bill,
+            matcher=active_matcher,
+            low_match_confidence_threshold=low_match_confidence_threshold,
+            duplicate_status=duplicate_status,
+            base_summary=summary,
+            base_utilization_report=utilization_report,
+            user_preference=user_preference,
+        )
+
+    return AuditResult(
+        line_results=line_results,
+        summary=summary,
+        utilization_report=utilization_report,
+        policy_comparison_report=policy_comparison_report,
+    )
+
+
+def _audit_policy_core(
+    policy: Policy,
+    bill: Bill,
+    matcher: SemanticMatcher,
+    low_match_confidence_threshold: float,
+    duplicate_status: str,
+) -> tuple[list[LineAuditResult], AuditSummary, UtilizationReport]:
     duplicates = _detect_duplicates(bill)
     resolved_duplicate_status = _resolve_duplicate_status(duplicate_status)
 
@@ -344,7 +438,7 @@ def _audit_invoice(
             )
             continue
 
-        match = active_matcher.match_line(line, bill, policy)
+        match = matcher.match_line(line, bill, policy)
         line_results.append(
             _evaluate_line(
                 policy=policy,
@@ -370,11 +464,35 @@ def _audit_invoice(
         ),
     )
     utilization_report = _build_utilization_report(policy=policy, line_results=line_results)
-    return AuditResult(
-        line_results=line_results,
-        summary=summary,
-        utilization_report=utilization_report,
-    )
+    return line_results, summary, utilization_report
+
+
+def _resolve_similar_policy_json_inputs(
+    direct_policy_jsons: list[dict] | None,
+    vector_refs: list[dict] | None,
+    resolver: SimilarPolicyResolver | None,
+) -> list[dict]:
+    merged: list[dict] = list(direct_policy_jsons or [])
+    if not vector_refs:
+        return merged
+
+    if resolver is None:
+        raise ValueError(
+            "Received similar_policy_vectors but no similar_policy_resolver is configured. "
+            "Provide AuditorAgentService(similar_policy_resolver=...) to pull policies from DB."
+        )
+
+    resolved = resolver.resolve(vector_refs)
+    if not isinstance(resolved, list):
+        raise ValueError("similar_policy_resolver.resolve(...) must return a list of policy JSON objects.")
+
+    for index, raw in enumerate(resolved):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"Resolved similar policy at index {index} is not a JSON object/dict."
+            )
+        merged.append(raw)
+    return merged
 
 
 def _evaluate_line(
@@ -826,3 +944,239 @@ def _overall_recommendation(overall_score: float) -> str:
     if overall_score >= 55:
         return "Overall plan has mixed value; review weak categories before renewal."
     return "Overall plan currently looks low-value for this bill profile."
+
+
+def _build_policy_comparison_report(
+    base_policy: Policy,
+    similar_policies: list[Policy],
+    bill: Bill,
+    matcher: SemanticMatcher,
+    low_match_confidence_threshold: float,
+    duplicate_status: str,
+    base_summary: AuditSummary,
+    base_utilization_report: UtilizationReport,
+    user_preference: str | None,
+) -> PolicyComparisonReport:
+    weights = {
+        "price": 0.50,
+        "policy_utilization": 0.20,
+        "coverage": 0.20,
+        "comparison": 0.10,
+    }
+
+    evaluated_options: list[tuple[Policy, AuditSummary, UtilizationReport]] = [
+        (base_policy, base_summary, base_utilization_report)
+    ]
+    for candidate in similar_policies:
+        _, candidate_summary, candidate_utilization_report = _audit_policy_core(
+            policy=candidate,
+            bill=bill,
+            matcher=matcher,
+            low_match_confidence_threshold=low_match_confidence_threshold,
+            duplicate_status=duplicate_status,
+        )
+        evaluated_options.append((candidate, candidate_summary, candidate_utilization_report))
+
+    patient_totals = [x[1].total_patient_responsible for x in evaluated_options]
+    min_patient = min(patient_totals) if patient_totals else 0.0
+    max_patient = max(patient_totals) if patient_totals else 0.0
+    patient_range = max_patient - min_patient
+
+    base_total_before_comparison = _weighted_total_without_comparison(
+        price_score=100.0 if patient_range == 0 else _price_score(
+            patient=base_summary.total_patient_responsible,
+            min_patient=min_patient,
+            patient_range=patient_range,
+        ),
+        utilization_score=base_utilization_report.overall_utilization_score,
+        coverage_score=_coverage_score(base_summary),
+        weights=weights,
+    )
+
+    option_scores: list[PolicyOptionScore] = []
+    for index, (candidate_policy, summary, utilization_report) in enumerate(evaluated_options):
+        policy_id = _policy_identifier(candidate_policy, index)
+        policy_name = _policy_name(candidate_policy, policy_id)
+        price_score = (
+            100.0
+            if patient_range == 0
+            else _price_score(
+                patient=summary.total_patient_responsible,
+                min_patient=min_patient,
+                patient_range=patient_range,
+            )
+        )
+        utilization_score = round(
+            _clamp_score(utilization_report.overall_utilization_score),
+            2,
+        )
+        coverage_score = _coverage_score(summary)
+        total_without_comparison = _weighted_total_without_comparison(
+            price_score=price_score,
+            utilization_score=utilization_score,
+            coverage_score=coverage_score,
+            weights=weights,
+        )
+        comparison_score = _comparison_score(
+            total_without_comparison=total_without_comparison,
+            base_total_without_comparison=base_total_before_comparison,
+            is_base=index == 0,
+        )
+        weighted_total = round(
+            total_without_comparison + (weights["comparison"] * comparison_score),
+            2,
+        )
+
+        option_scores.append(
+            PolicyOptionScore(
+                policy_id=policy_id,
+                policy_name=policy_name,
+                price_score=round(price_score, 2),
+                utilization_score=utilization_score,
+                coverage_score=coverage_score,
+                comparison_score=round(comparison_score, 2),
+                weighted_total_score=weighted_total,
+                total_invoice_amount=round(summary.total_invoice_amount, 2),
+                total_approved=round(summary.total_approved, 2),
+                total_patient_responsible=round(summary.total_patient_responsible, 2),
+                recommendation=_policy_option_recommendation(weighted_total),
+            )
+        )
+
+    option_scores.sort(key=lambda x: x.weighted_total_score, reverse=True)
+    best = option_scores[0] if option_scores else None
+    best_id = best.policy_id if best is not None else ""
+    best_name = best.policy_name if best is not None else ""
+
+    general_recommendation = (
+        f"Best policy option is '{best_name}' ({best_id}) based on weighted score."
+        if best is not None
+        else "No policy options available for comparison."
+    )
+    normalized_preference = _normalize_policy_preference(user_preference)
+    preference_best = _select_preference_best(option_scores, normalized_preference)
+    preference_best_id = preference_best.policy_id if preference_best is not None else ""
+    preference_best_name = preference_best.policy_name if preference_best is not None else ""
+    preference_recommendation = _build_preference_recommendation(
+        preference=normalized_preference,
+        preference_best=preference_best,
+    )
+    return PolicyComparisonReport(
+        weights=weights,
+        options=option_scores,
+        best_policy_id=best_id,
+        best_policy_name=best_name,
+        general_recommendation=general_recommendation,
+        user_preference=normalized_preference,
+        preference_best_policy_id=preference_best_id,
+        preference_best_policy_name=preference_best_name,
+        preference_recommendation=preference_recommendation,
+        recommendation=general_recommendation,
+    )
+
+
+def _price_score(patient: float, min_patient: float, patient_range: float) -> float:
+    if patient_range <= 0:
+        return 100.0
+    normalized = (patient - min_patient) / patient_range
+    return _clamp_score((1.0 - normalized) * 100.0)
+
+
+def _coverage_score(summary: AuditSummary) -> float:
+    if summary.total_invoice_amount <= 0:
+        return 0.0
+    return round(
+        _clamp_score((summary.total_approved / summary.total_invoice_amount) * 100.0),
+        2,
+    )
+
+
+def _weighted_total_without_comparison(
+    price_score: float,
+    utilization_score: float,
+    coverage_score: float,
+    weights: dict[str, float],
+) -> float:
+    return round(
+        (weights["price"] * _clamp_score(price_score))
+        + (weights["policy_utilization"] * _clamp_score(utilization_score))
+        + (weights["coverage"] * _clamp_score(coverage_score)),
+        2,
+    )
+
+
+def _comparison_score(
+    total_without_comparison: float,
+    base_total_without_comparison: float,
+    is_base: bool,
+) -> float:
+    if is_base:
+        return 50.0
+    delta = total_without_comparison - base_total_without_comparison
+    scaled = 50.0 + (delta * 2.0)
+    return _clamp_score(scaled)
+
+
+def _policy_identifier(policy: Policy, index: int) -> str:
+    if policy.meta.policy_id:
+        return policy.meta.policy_id
+    return "A1" if index == 0 else f"ALT_{index}"
+
+
+def _policy_name(policy: Policy, fallback_id: str) -> str:
+    return policy.meta.policy_name or f"Policy {fallback_id}"
+
+
+def _policy_option_recommendation(weighted_total: float) -> str:
+    if weighted_total >= 75:
+        return "Excellent fit for this receipt profile."
+    if weighted_total >= 55:
+        return "Decent fit, but review trade-offs."
+    return "Weak fit for this receipt profile."
+
+
+def _normalize_policy_preference(preference: str | None) -> PolicyPreference | None:
+    if preference is None:
+        return None
+    normalized = preference.strip().lower()
+    if normalized in {"price", "coverage"}:
+        return normalized
+    return None
+
+
+def _select_preference_best(
+    option_scores: list[PolicyOptionScore],
+    preference: PolicyPreference | None,
+) -> PolicyOptionScore | None:
+    if not option_scores or preference is None:
+        return None
+    if preference == "price":
+        # Lower patient responsibility means better out-of-pocket price for the user.
+        return min(
+            option_scores,
+            key=lambda x: (x.total_patient_responsible, -x.weighted_total_score),
+        )
+    # coverage preference
+    return max(
+        option_scores,
+        key=lambda x: (x.coverage_score, x.total_approved, -x.total_patient_responsible),
+    )
+
+
+def _build_preference_recommendation(
+    preference: PolicyPreference | None,
+    preference_best: PolicyOptionScore | None,
+) -> str:
+    if preference is None:
+        return ""
+    if preference_best is None:
+        return "Preference-based recommendation unavailable."
+    if preference == "price":
+        return (
+            f"Price preference selected: choose '{preference_best.policy_name}' "
+            f"({preference_best.policy_id}) for lower out-of-pocket amount."
+        )
+    return (
+        f"Coverage preference selected: choose '{preference_best.policy_name}' "
+        f"({preference_best.policy_id}) for stronger coverage outcome."
+    )

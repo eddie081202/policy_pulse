@@ -1,54 +1,141 @@
 SAMPLE_POLICY = {
-    "meta": {
-        "currency": "USD",
-        "deductible": 150.0,
-        "coinsurance": 0.8,
-    },
-    "coverage_categories": [
-        {
-            "id": "diagnostic_imaging",
-            "name": "Diagnostic Imaging",
-            "description": "CT scans, MRI, X-ray, and ultrasound.",
-            "coverage_rate": 0.8,
-            "premium_score": 78.0,
-            "upgrade_premium_cost": 120.0,
-            "upgrade_coverage_rate": 0.95,
-            "per_item_limit": 2000.0,
-            "scope": "all_conditions",
-            "clauses": [{"id": "4.2.1", "text": "Insurer covers 80% of diagnostic imaging."}],
+    "policy": {
+        "meta": {
+            "policy_id": "A1",
+            "policy_name": "Current Policy A1",
+            "currency": "USD",
+            "deductibles": {
+                "Hospital Room and Board": 150,
+                "Diagnostic Imaging": 100,
+            },
+            "coinsurance": None,
         },
-        {
-            "id": "hospital_room",
-            "name": "Hospital Room and Board",
-            "description": "Daily room fee and nursing support.",
-            "coverage_rate": 0.7,
-            "premium_score": 68.0,
-            "upgrade_premium_cost": 700.0,
-            "upgrade_coverage_rate": 1.0,
-            "per_item_limit": 300.0,
-            "scope": "all_conditions",
-            "clauses": [{"id": "3.1.2", "text": "Room charge covered up to USD 300 per day."}],
-        },
-        {
-            "id": "emergency_care",
-            "name": "Emergency Care",
-            "description": "Accident emergency interventions.",
-            "coverage_rate": 1.0,
-            "premium_score": 82.0,
-            "per_item_limit": None,
-            "scope": "accident_only",
-            "clauses": [{"id": "2.4.0", "text": "Emergency care covered only for accidents."}],
-        },
-    ],
-    "exclusions": [
-        {
-            "id": "excl_cosmetic",
-            "name": "Cosmetic Procedures",
-            "text": "Elective cosmetic services are excluded.",
-            "clauses": [{"id": "5.1.3", "text": "Cosmetic procedures are excluded."}],
-        }
-    ],
+        "coverage_categories": [
+            {
+                "name": "Diagnostic Imaging",
+                "description": "CT scans, MRI, X-ray, and ultrasound.",
+                "coverage_rate": "80% up to limits",
+                "limits": {"per_item": 2000},
+                "premium_score": 78.0,
+                "upgrade_premium_cost": 120.0,
+                "upgrade_coverage_rate": 0.95,
+                "scope": "all_conditions",
+                "core_clauses": [
+                    "Insurer covers 80% of diagnostic imaging.",
+                    "Coverage applies to medically necessary scans.",
+                ],
+            },
+            {
+                "name": "Hospital Room and Board",
+                "description": "Daily room fee and nursing support.",
+                "coverage_rate": "70% up to limits",
+                "limits": {"per_day": 300},
+                "premium_score": 68.0,
+                "upgrade_premium_cost": 700.0,
+                "upgrade_coverage_rate": 1.0,
+                "scope": "all_conditions",
+                "core_clauses": [
+                    "Room charge covered up to USD 300 per day.",
+                    "Services must be provided by licensed facilities.",
+                ],
+            },
+            {
+                "name": "Emergency Care",
+                "description": "Accident emergency interventions.",
+                "coverage_rate": "100%",
+                "premium_score": 82.0,
+                "scope": "accident_only",
+                "core_clauses": [
+                    "Emergency care covered only for accidents.",
+                ],
+            },
+        ],
+        "exclusions": [
+            "Elective cosmetic services are excluded.",
+            "Experimental treatment without policy endorsement is excluded.",
+        ],
+    }
 }
+
+
+SAMPLE_SIMILAR_POLICIES = [
+    {
+        "policy": {
+            "meta": {
+                "policy_id": "B1",
+                "policy_name": "Alternative Policy B1",
+                "currency": "USD",
+                "deductibles": {"General": 100},
+                "coinsurance": 0.85,
+            },
+            "coverage_categories": [
+                {
+                    "name": "Diagnostic Imaging",
+                    "description": "CT scans, MRI, X-ray, and ultrasound.",
+                    "coverage_rate": "90%",
+                    "premium_score": 70.0,
+                    "scope": "all_conditions",
+                    "core_clauses": ["Insurer covers 90% of diagnostic imaging."],
+                },
+                {
+                    "name": "Hospital Room and Board",
+                    "description": "Daily room fee and nursing support.",
+                    "coverage_rate": "90%",
+                    "premium_score": 65.0,
+                    "scope": "all_conditions",
+                    "core_clauses": ["Room charge covered up to USD 400 per day."],
+                },
+                {
+                    "name": "Emergency Care",
+                    "description": "Accident emergency interventions.",
+                    "coverage_rate": "100%",
+                    "premium_score": 78.0,
+                    "scope": "accident_only",
+                    "core_clauses": ["Emergency care covered only for accidents."],
+                },
+            ],
+            "exclusions": ["Elective cosmetic services are excluded."],
+        },
+    },
+    {
+        "policy": {
+            "meta": {
+                "policy_id": "C1",
+                "policy_name": "Alternative Policy C1",
+                "currency": "USD",
+                "deductibles": {"General": 300},
+                "coinsurance": 0.75,
+            },
+            "coverage_categories": [
+                {
+                    "name": "Diagnostic Imaging",
+                    "description": "CT scans, MRI, X-ray, and ultrasound.",
+                    "coverage_rate": "75%",
+                    "premium_score": 90.0,
+                    "scope": "all_conditions",
+                    "core_clauses": ["Insurer covers 75% of diagnostic imaging."],
+                },
+                {
+                    "name": "Hospital Room and Board",
+                    "description": "Daily room fee and nursing support.",
+                    "coverage_rate": "65%",
+                    "premium_score": 92.0,
+                    "scope": "all_conditions",
+                    "core_clauses": ["Room charge covered up to USD 280 per day."],
+                },
+                {
+                    "name": "Emergency Care",
+                    "description": "Accident emergency interventions.",
+                    "coverage_rate": "100%",
+                    "premium_score": 88.0,
+                    "scope": "accident_only",
+                    "core_clauses": ["Emergency care covered only for accidents."],
+                },
+            ],
+            "exclusions": ["Elective cosmetic services are excluded."],
+        },
+    },
+]
 
 
 SAMPLE_BILL = {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import re
 from typing import Any, Literal
 
 from auditor.entities.base_agent_entity import BaseAgentEntity
@@ -8,12 +9,24 @@ from auditor.entities.base_agent_entity import BaseAgentEntity
 
 AuditStatus = Literal["approved", "rejected", "partial", "warning"]
 DuplicateHandling = Literal["warning", "rejected"]
+PolicyPreference = Literal["price", "coverage"]
 
 
 def to_optional_float(value: Any) -> float | None:
     if value is None:
         return None
-    return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
+    if match is None:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -43,10 +56,16 @@ class CoverageCategory:
     @classmethod
     def from_dict(cls, raw: dict[str, Any], fallback_rate: float) -> "CoverageCategory":
         rate = raw.get("coverage_rate")
-        category_rate = float(rate) if rate is not None else float(fallback_rate)
+        category_rate = _parse_coverage_rate(rate, fallback_rate=float(fallback_rate))
+        name = str(raw.get("name", ""))
+        category_id = str(raw.get("id", "")).strip() or _slugify(name)
+        raw_clauses = raw.get("clauses")
+        if raw_clauses is None:
+            raw_clauses = raw.get("core_clauses", [])
+        clauses = _parse_clause_list(raw_clauses)
         return cls(
-            id=str(raw.get("id", "")),
-            name=str(raw.get("name", "")),
+            id=category_id,
+            name=name,
             description=str(raw.get("description", "")),
             coverage_rate=category_rate,
             per_item_limit=to_optional_float(raw.get("per_item_limit")),
@@ -55,7 +74,7 @@ class CoverageCategory:
             upgrade_premium_cost=to_optional_float(raw.get("upgrade_premium_cost")),
             upgrade_coverage_rate=to_optional_float(raw.get("upgrade_coverage_rate")),
             scope=str(raw.get("scope", "all_conditions")),
-            clauses=[Clause.from_dict(x) for x in raw.get("clauses", [])],
+            clauses=clauses,
         )
 
 
@@ -67,17 +86,27 @@ class Exclusion:
     clauses: list[Clause] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "Exclusion":
+    def from_dict(cls, raw: dict[str, Any] | str) -> "Exclusion":
+        if isinstance(raw, str):
+            text = raw.strip()
+            return cls(
+                id=_slugify(text),
+                name=text[:80],
+                text=text,
+                clauses=[],
+            )
         return cls(
             id=str(raw.get("id", "")),
             name=str(raw.get("name", "")),
             text=str(raw.get("text", "")),
-            clauses=[Clause.from_dict(x) for x in raw.get("clauses", [])],
+            clauses=_parse_clause_list(raw.get("clauses", [])),
         )
 
 
 @dataclass
 class PolicyMeta:
+    policy_id: str = ""
+    policy_name: str = ""
     currency: str = "USD"
     deductible: float = 0.0
     coinsurance: float = 0.8
@@ -85,10 +114,14 @@ class PolicyMeta:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "PolicyMeta":
+        deductible = _parse_meta_deductible(raw)
+        coinsurance = _safe_float(raw.get("coinsurance"), 0.8)
         return cls(
+            policy_id=str(raw.get("policy_id", "")),
+            policy_name=str(raw.get("policy_name", "")),
             currency=str(raw.get("currency", "USD")),
-            deductible=float(raw.get("deductible", 0.0)),
-            coinsurance=float(raw.get("coinsurance", 0.8)),
+            deductible=deductible,
+            coinsurance=coinsurance,
             annual_limit=to_optional_float(raw.get("annual_limit")),
         )
 
@@ -101,12 +134,13 @@ class Policy:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "Policy":
-        meta = PolicyMeta.from_dict(raw.get("meta", {}))
+        policy_raw = raw.get("policy", raw)
+        meta = PolicyMeta.from_dict(policy_raw.get("meta", {}))
         categories = [
             CoverageCategory.from_dict(x, fallback_rate=meta.coinsurance)
-            for x in raw.get("coverage_categories", [])
+            for x in policy_raw.get("coverage_categories", [])
         ]
-        exclusions = [Exclusion.from_dict(x) for x in raw.get("exclusions", [])]
+        exclusions = [Exclusion.from_dict(x) for x in policy_raw.get("exclusions", [])]
         return cls(meta=meta, coverage_categories=categories, exclusions=exclusions)
 
 
@@ -229,10 +263,40 @@ class UtilizationReport:
 
 
 @dataclass
+class PolicyOptionScore:
+    policy_id: str
+    policy_name: str
+    price_score: float
+    utilization_score: float
+    coverage_score: float
+    comparison_score: float
+    weighted_total_score: float
+    total_invoice_amount: float
+    total_approved: float
+    total_patient_responsible: float
+    recommendation: str
+
+
+@dataclass
+class PolicyComparisonReport:
+    weights: dict[str, float] = field(default_factory=dict)
+    options: list[PolicyOptionScore] = field(default_factory=list)
+    best_policy_id: str = ""
+    best_policy_name: str = ""
+    general_recommendation: str = ""
+    user_preference: PolicyPreference | None = None
+    preference_best_policy_id: str = ""
+    preference_best_policy_name: str = ""
+    preference_recommendation: str = ""
+    recommendation: str = ""  # Backward-compatible alias of general_recommendation
+
+
+@dataclass
 class AuditResult:
     line_results: list[LineAuditResult]
     summary: AuditSummary
     utilization_report: UtilizationReport | None = None
+    policy_comparison_report: PolicyComparisonReport | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -264,17 +328,103 @@ class AuditorAgentEntity(BaseAgentEntity):
             ),
             input_contract={
                 "policy_json": {
-                    "meta": "currency, deductible, coinsurance",
-                    "coverage_categories": "id, name, coverage_rate, scope, clauses",
-                    "exclusions": "id, name, clauses",
+                    "legacy_supported": "meta + coverage_categories + exclusions",
+                    "new_supported": (
+                        "policy.meta + policy.coverage_categories "
+                        "(core_clauses accepted) + policy.exclusions (string list accepted)"
+                    ),
                 },
                 "bill_json": {
                     "invoice_meta": "diagnosis, date, hospital_name",
                     "line_items": "id, item_name, item_code, quantity, unit_cost, total_cost",
                 },
+                "similar_policy_vectors": (
+                    "optional list of vector references for B1/C1/D1..., "
+                    "resolved by DB/vector integration"
+                ),
+                "user_preference": "optional: 'price' or 'coverage'",
             },
             output_contract={
                 "line_results": "status, allowed_amount, patient_responsible_amount, reason, flags",
                 "summary": "total_invoice_amount, total_approved, total_patient_responsible, currency",
+                "utilization_report": "category_scores, overall_utilization_score, upgrade_recommendations",
+                "policy_comparison_report": (
+                    "weighted policy ranking (general) + optional preference-based "
+                    "best policy for 'price' or 'coverage'"
+                ),
             },
         )
+
+
+def _parse_coverage_rate(rate: Any, fallback_rate: float) -> float:
+    if rate is None:
+        return fallback_rate
+    if isinstance(rate, (int, float)):
+        raw = float(rate)
+        if raw > 1:
+            if raw <= 100:
+                return raw / 100.0
+            return 1.0
+        return max(0.0, raw)
+    if isinstance(rate, dict):
+        # Structured text-like rates (for example weekly indemnity) are not directly
+        # convertible into payout percentage, so we keep fallback.
+        return fallback_rate
+    text = str(rate).strip().lower()
+    if not text:
+        return fallback_rate
+    number = to_optional_float(text)
+    if number is None:
+        return fallback_rate
+    if "%" in text:
+        return max(0.0, min(1.0, number / 100.0))
+    if number > 1:
+        if number <= 100:
+            return number / 100.0
+        return 1.0
+    return max(0.0, number)
+
+
+def _parse_clause_list(raw_clauses: Any) -> list[Clause]:
+    clauses: list[Clause] = []
+    if not isinstance(raw_clauses, list):
+        return clauses
+    for index, item in enumerate(raw_clauses):
+        if isinstance(item, dict):
+            clauses.append(Clause.from_dict(item))
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        clauses.append(Clause(id=f"clause_{index + 1}", text=text))
+    return clauses
+
+
+def _slugify(value: str) -> str:
+    lowered = value.lower().strip()
+    normalized = re.sub(r"[^a-z0-9]+", "_", lowered)
+    compact = re.sub(r"_+", "_", normalized).strip("_")
+    return compact or "unknown"
+
+
+def _safe_float(value: Any, default: float) -> float:
+    parsed = to_optional_float(value)
+    return parsed if parsed is not None else default
+
+
+def _parse_meta_deductible(meta_raw: dict[str, Any]) -> float:
+    direct = to_optional_float(meta_raw.get("deductible"))
+    if direct is not None:
+        return max(0.0, direct)
+
+    deductibles = meta_raw.get("deductibles")
+    if isinstance(deductibles, dict):
+        numeric_values: list[float] = []
+        for val in deductibles.values():
+            parsed = to_optional_float(val)
+            if parsed is not None:
+                numeric_values.append(parsed)
+        if numeric_values:
+            # Conservative default for mixed deductible declarations.
+            return max(0.0, min(numeric_values))
+    return 0.0
