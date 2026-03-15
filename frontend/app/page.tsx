@@ -4,19 +4,76 @@ import React, { useState, useEffect } from 'react';
 import { UploadCloud, FileText, Image as ImageIcon, Activity, CheckCircle2, Database, Cpu, Shield, Landmark, DollarSign, Library, X, FileCode, ExternalLink, ChevronLeft } from 'lucide-react';
 
 type DatasetFile = { name: string, path: string, type: string, size: string };
+type PreferenceMode = "price" | "policy" | "no_preference";
+type ProcessStage = "idle" | "uploading" | "analyzing" | "scoring" | "done" | "error";
+type ScoreBreakdown = {
+  price_score: number;
+  policy_utilization_score: number;
+  coverage_score: number;
+  relative_policy_quality_score: number;
+};
+type SourceReference = {
+  source_file: string;
+  source_path: string;
+  chunk_id: string;
+};
+type JudgeAlternative = {
+  rank: number;
+  policy_id: string;
+  policy_name: string;
+  category?: string | null;
+  final_weighted_score: number;
+  score_breakdown: ScoreBreakdown;
+  delta_vs_current: {
+    final_score_delta: number;
+    premium_delta?: number | null;
+    deductible_delta?: number | null;
+    coverage_gap_delta?: number | null;
+  };
+  why_better: string[];
+  source_references?: SourceReference[];
+};
+type JudgeResult = {
+  request_id: string;
+  preference: PreferenceMode;
+  total_score?: number;
+  current_policy: {
+    policy_id?: string | null;
+    policy_name?: string | null;
+    final_weighted_score: number;
+    verdict: string;
+    key_findings: string[];
+    score_breakdown: ScoreBreakdown;
+  };
+  alternatives: JudgeAlternative[];
+  recommendation: {
+    mode: PreferenceMode;
+    summary: string;
+    actions: string[];
+  };
+  explanations: {
+    confidence: number;
+    limitations: string[];
+  };
+};
 
 export default function FinsuranceDashboard() {
   const [contractFile, setContractFile] = useState<File | null>(null);
-  const [billFiles, setBillFiles] = useState<FileList | null>(null);
+  const [billFile, setBillFile] = useState<File | null>(null);
   const [insuranceType, setInsuranceType] = useState('health');
+  const [preference, setPreference] = useState<PreferenceMode>("no_preference");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [processStage, setProcessStage] = useState<ProcessStage>("idle");
   const [processStatus, setProcessStatus] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null);
   
   // Datasets Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [datasetCategory, setDatasetCategory] = useState<'All' | 'Health' | 'Auto' | 'Homeowners' | 'Life & Other' | 'CSV'>('All');
   const [datasetReferences, setDatasetReferences] = useState<Record<string, DatasetFile[]>>({});
   const [viewingFile, setViewingFile] = useState<{name: string, url: string} | null>(null);
+  const [alternativeViewer, setAlternativeViewer] = useState<{name: string, url: string | null} | null>(null);
 
   // Fetch real dataset list from backend API
   useEffect(() => {
@@ -35,18 +92,75 @@ export default function FinsuranceDashboard() {
     return datasetReferences[datasetCategory] || [];
   };
 
+  const resolveAlternativePath = (alternative: JudgeAlternative): string | null => {
+    const firstSourcePath = alternative.source_references?.[0]?.source_path;
+    if (firstSourcePath) {
+      const normalized = firstSourcePath.replaceAll("\\", "/");
+      const marker = "/insurance_contracts/";
+      const markerIdx = normalized.indexOf(marker);
+      if (markerIdx >= 0) {
+        const relativePath = normalized.slice(markerIdx + marker.length).trim();
+        if (relativePath) return relativePath;
+      }
+      if (!normalized.startsWith("/") && !normalized.includes("..")) {
+        return normalized;
+      }
+    }
+
+    const category = (alternative.category || "").trim();
+    const policyName = (alternative.policy_name || "").trim();
+    if (category && policyName && policyName.toLowerCase().endsWith(".pdf")) {
+      return `${category}/${policyName}`;
+    }
+    return null;
+  };
+
+  const resolveAlternativeDocUrl = (alternative: JudgeAlternative): string | null => {
+    const relativePath = resolveAlternativePath(alternative);
+    if (!relativePath) return null;
+    return `/api/documents?file=${encodeURIComponent(relativePath)}`;
+  };
+
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contractFile || !billFiles) return;
+    if (!contractFile || !billFile) return;
 
     setIsAnalyzing(true);
+    setProcessStage("uploading");
     setProcessStatus(null);
+    setErrorDetail(null);
+    setJudgeResult(null);
 
-    // Mocking the connection latency before backend implementation
-    setTimeout(() => {
+    try {
+      const formData = new FormData();
+      formData.append("contract_file", contractFile);
+      formData.append("bill_file", billFile);
+      formData.append("preference", preference);
+
+      const apiBase = process.env.NEXT_PUBLIC_JUDGE_API_BASE_URL || "http://localhost:8000";
+      setProcessStage("analyzing");
+      setProcessStatus("Uploading files and running parser + retrieval...");
+      const response = await fetch(`${apiBase}/api/judge/evaluate`, {
+        method: "POST",
+        body: formData,
+      });
+
+      setProcessStage("scoring");
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Judge evaluation failed.");
+      }
+      setJudgeResult(payload as JudgeResult);
+      setProcessStage("done");
+      setProcessStatus("Audit completed and recommendations generated.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error.";
+      setProcessStage("error");
+      setErrorDetail(message);
+      setProcessStatus(`Audit failed: ${message}`);
+    } finally {
       setIsAnalyzing(false);
-      setProcessStatus("Files ingested. Backend integration pending.");
-    }, 2000);
+    }
   };
 
   return (
@@ -102,6 +216,18 @@ export default function FinsuranceDashboard() {
                   <option value="auto">Auto & Motor</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Recommendation Preference</label>
+                <select
+                  value={preference}
+                  onChange={(e) => setPreference(e.target.value as PreferenceMode)}
+                  className="w-full rounded-xl border border-slate-600 px-4 py-3 bg-slate-900/80 text-white focus:bg-slate-900 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
+                >
+                  <option value="price">Lower Price, Similar Policy</option>
+                  <option value="policy">Better Policy, Similar Price</option>
+                  <option value="no_preference">No Preference</option>
+                </select>
+              </div>
 
               {/* Policy Upload Dropzone */}
               <div>
@@ -134,39 +260,41 @@ export default function FinsuranceDashboard() {
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2 flex items-center gap-2">
                   <ImageIcon className="w-4 h-4 text-emerald-500" />
-                  Ledger / Invoice / Bills (Images / PDFs)
+                  Bill / Invoice (Image or PDF)
                 </label>
                 <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-slate-600 border-dashed rounded-xl cursor-pointer bg-slate-900/50 hover:bg-slate-800/80 hover:border-emerald-500/50 transition-all group">
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
                     <UploadCloud className="w-6 h-6 text-slate-500 group-hover:text-emerald-400 mb-2 transition-colors" />
-                    <p className="mb-1 text-xs text-slate-400"><span className="font-semibold text-emerald-400">Click to upload</span> multiple files</p>
+                    <p className="mb-1 text-xs text-slate-400"><span className="font-semibold text-emerald-400">Click to upload</span> one bill file</p>
                   </div>
                   <input 
                     type="file" 
                     accept="image/*,.pdf" 
-                    multiple
-                    onChange={(e) => setBillFiles(e.target.files)}
+                    onChange={(e) => setBillFile(e.target.files?.[0] || null)}
                     className="hidden"
                     required
                   />
                 </label>
-                {billFiles && billFiles.length > 0 && (
+                {billFile && (
                   <div className="mt-3 flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 px-3 py-2 rounded-lg border border-emerald-400/20">
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>{billFiles.length} file(s) structured for analysis</span>
+                    <span className="truncate">{billFile.name}</span>
                   </div>
                 )}
               </div>
 
               <button 
                 type="submit" 
-                disabled={isAnalyzing || !contractFile || !billFiles}
+                disabled={isAnalyzing || !contractFile || !billFile}
                 className="w-full mt-8 bg-emerald-500 text-slate-950 font-bold py-3.5 rounded-xl hover:bg-emerald-400 transition-all disabled:opacity-50 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed flex justify-center items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.4)]"
               >
                 {isAnalyzing ? (
                   <>
                     <Activity className="w-5 h-5 animate-pulse" />
-                    Processing Data Vectors...
+                    {processStage === "uploading" && "Uploading files..."}
+                    {processStage === "analyzing" && "Analyzing documents..."}
+                    {processStage === "scoring" && "Scoring policy fit..."}
+                    {(processStage === "idle" || processStage === "done" || processStage === "error") && "Processing..."}
                   </>
                 ) : (
                   "Execute Audit"
@@ -206,19 +334,108 @@ export default function FinsuranceDashboard() {
               <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
                 <CheckCircle2 className="w-10 h-10 text-emerald-400" />
               </div>
-              <h2 className="text-xl font-bold text-slate-200">Processing Initiated</h2>
+              <h2 className="text-xl font-bold text-slate-200">Audit Result</h2>
               <p className="text-slate-400 text-sm max-w-md mx-auto">
-                Documents have been securely structured and serialized. The vector database is primed.
+                Documents were processed through parser, retrieval, and judge scoring.
               </p>
               
               <div className="mt-8 p-6 bg-slate-800/40 rounded-xl border border-dashed border-slate-600 inline-block">
                 <p className="text-emerald-400 font-mono text-sm">
                   {processStatus}
                 </p>
-                <p className="text-slate-500 text-xs mt-2">
-                  (Ready to connect backend endpoints for visual data rendering)
-                </p>
               </div>
+              {errorDetail && (
+                <div className="mt-2 p-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-left">
+                  <p className="text-xs font-semibold text-rose-300">Error Detail</p>
+                  <p className="text-xs text-rose-200 mt-1">{errorDetail}</p>
+                </div>
+              )}
+              {judgeResult && (
+                <div className="text-left mt-6 space-y-4">
+                  <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/40">
+                    <p className="text-sm text-slate-300">Current Policy Verdict: <span className="text-emerald-400 font-semibold">{judgeResult.current_policy.verdict}</span></p>
+                    <p className="text-sm text-slate-300">Total Score: <span className="text-emerald-400 font-semibold">{(judgeResult.total_score ?? judgeResult.current_policy.final_weighted_score ?? 0).toFixed(2)}</span></p>
+                    <p className="text-xs text-slate-500 mt-2">Confidence: {(judgeResult.explanations?.confidence ?? 0).toFixed(2)}</p>
+                    {(judgeResult.explanations?.confidence ?? 0) < 0.5 && (
+                      <p className="text-xs text-amber-300 mt-1">Low confidence. Consider uploading clearer documents for better recommendations.</p>
+                    )}
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/40">
+                    <h3 className="text-sm font-semibold text-slate-200 mb-2">Score Breakdown</h3>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
+                      <p>Price: {(judgeResult.current_policy.score_breakdown?.price_score ?? 0).toFixed(2)}</p>
+                      <p>Utilization: {(judgeResult.current_policy.score_breakdown?.policy_utilization_score ?? 0).toFixed(2)}</p>
+                      <p>Coverage: {(judgeResult.current_policy.score_breakdown?.coverage_score ?? 0).toFixed(2)}</p>
+                      <p>Relative Quality: {(judgeResult.current_policy.score_breakdown?.relative_policy_quality_score ?? 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/40">
+                    <h3 className="text-sm font-semibold text-slate-200 mb-2">Recommendation</h3>
+                    <p className="text-sm text-emerald-300">{judgeResult.recommendation?.summary || "No recommendation summary available."}</p>
+                    <ul className="mt-2 text-xs text-slate-300 space-y-1">
+                      {(judgeResult.recommendation?.actions || []).map((action, idx) => (
+                        <li key={idx}>- {action}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {judgeResult.alternatives.length > 0 && (
+                    <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/40">
+                      <h3 className="text-sm font-semibold text-slate-200 mb-2">Top Alternatives</h3>
+                      <div className="space-y-3">
+                        {judgeResult.alternatives.map((alt) => (
+                          <div key={`${alt.policy_id}-${alt.rank}`} className="rounded-lg border border-slate-700 p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAlternativeViewer({
+                                  name: alt.policy_name,
+                                  url: resolveAlternativeDocUrl(alt),
+                                });
+                              }}
+                              className="text-sm text-slate-200 font-semibold hover:text-emerald-400 underline-offset-4 hover:underline transition-colors text-left"
+                            >
+                              #{alt.rank} {alt.policy_name}
+                            </button>
+                            <p className="text-xs text-slate-400">Score: {alt.final_weighted_score.toFixed(2)}</p>
+                            <ul className="mt-1 text-xs text-slate-300 space-y-1">
+                              {alt.why_better.slice(0, 2).map((line, idx) => (
+                                <li key={idx}>- {line}</li>
+                              ))}
+                            </ul>
+                            <div className="mt-2">
+                              {resolveAlternativeDocUrl(alt) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAlternativeViewer({
+                                      name: alt.policy_name,
+                                      url: resolveAlternativeDocUrl(alt),
+                                    });
+                                  }}
+                                  className="text-xs text-emerald-300 hover:text-emerald-200 underline underline-offset-2"
+                                >
+                                  View policy document
+                                </button>
+                              ) : (
+                                <p className="text-xs text-slate-500">Policy source unavailable for preview.</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {judgeResult.alternatives.length === 0 && (
+                    <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/40">
+                      <h3 className="text-sm font-semibold text-slate-200 mb-2">Top Alternatives</h3>
+                      <p className="text-xs text-slate-400">No alternatives found from current vector matches.</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -369,6 +586,62 @@ export default function FinsuranceDashboard() {
                     </div>
                   </div>
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alternative Policy Modal */}
+      {alternativeViewer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6">
+          <div
+            className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
+            onClick={() => setAlternativeViewer(null)}
+          ></div>
+          <div className="relative z-10 w-[95vw] max-w-6xl h-[85vh] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-900/80">
+              <div>
+                <h3 className="text-xl font-bold text-slate-100 truncate">{alternativeViewer.name}</h3>
+                <p className="text-sm text-slate-400">Alternative Policy Preview</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {alternativeViewer.url && (
+                  <a
+                    href={alternativeViewer.url}
+                    target="_blank"
+                    className="text-emerald-400 hover:text-white p-2.5 rounded-xl hover:bg-emerald-500/20 transition-colors flex items-center border border-transparent mr-2"
+                    title="Open in new tab"
+                  >
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Open in new tab</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => setAlternativeViewer(null)}
+                  className="text-slate-400 border border-slate-700 hover:text-white p-2.5 rounded-xl hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-400 transition-all bg-slate-800 shadow-xl"
+                  title="Close Preview"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden bg-slate-950 p-2">
+              {alternativeViewer.url ? (
+                <iframe
+                  src={alternativeViewer.url}
+                  className="w-full h-full rounded-xl border border-slate-700 bg-white"
+                  title="Alternative Policy Viewer"
+                />
+              ) : (
+                <div className="w-full h-full rounded-xl border border-dashed border-slate-700 bg-slate-900/40 flex items-center justify-center p-6 text-center">
+                  <div>
+                    <p className="text-slate-300 text-sm font-semibold">Document preview unavailable</p>
+                    <p className="text-slate-500 text-xs mt-2">
+                      This alternative does not include a resolvable PDF source path.
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
           </div>
