@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
@@ -50,6 +51,7 @@ from pydantic import BaseModel, Field
 
 class _AuditLLMOutput(BaseModel):
     discrepancies: list[str] = Field(
+        default_factory=list,
         description=(
             "List of discrepancies found between the uploaded contract and any of the retrieved "
             "knowledge base contracts. Each item must be a plain human-readable sentence string, "
@@ -58,6 +60,7 @@ class _AuditLLMOutput(BaseModel):
         )
     )
     audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"] = Field(
+        default="NEEDS_REVIEW",
         description=(
             "PASS if the uploaded contract's key fields are consistent with the knowledge base "
             "contracts at > 70% confidence. "
@@ -66,9 +69,13 @@ class _AuditLLMOutput(BaseModel):
         )
     )
     explanation: str = Field(
+        default="Audit model returned partial output; defaulting to NEEDS_REVIEW.",
         description="A concise narrative explanation of the audit decision."
     )
     confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Confidence score between 0.0 and 1.0."
     )
 
@@ -107,6 +114,7 @@ class AuditResult(BaseModel):
     audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
     explanation: str
     confidence: float
+    matched_candidates: list[dict] = Field(default_factory=list)
 
 
 class AgentDocReaderService(BaseService):
@@ -295,6 +303,92 @@ class AgentDocReaderService(BaseService):
             text=doc.page_content,
         )
 
+    def _to_float(self, value: object) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip().replace(",", "")
+        if text.endswith("%"):
+            text = text[:-1]
+        match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if not match:
+            return None
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
+    def _extract_coverage_keywords(self, text: str) -> list[str]:
+        known = [
+            "primary care",
+            "emergency room",
+            "prescription",
+            "dental",
+            "vision",
+            "inpatient",
+            "outpatient",
+            "specialist",
+            "preventive",
+        ]
+        lower = text.lower()
+        return [kw for kw in known if kw in lower]
+
+    def _extract_metric(self, text: str, pattern: str) -> float | None:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            return None
+        return self._to_float(match.group(1))
+
+    def _build_matched_candidates(self, docs: list[Document]) -> list[dict]:
+        """Normalize retrieved documents into policy-comparison candidates."""
+        grouped: dict[str, dict] = {}
+        for doc in docs:
+            reference = self._build_document_reference(doc)
+            key = reference.source_file or reference.chunk_id
+            text = doc.page_content or ""
+            premium = self._extract_metric(text, r"premium[^0-9]*(\d+(?:\.\d+)?)")
+            deductible = self._extract_metric(text, r"deductible[^0-9]*(\d+(?:\.\d+)?)")
+            bucket = grouped.setdefault(
+                key,
+                {
+                    "policy_id": key,
+                    "policy_name": reference.source_file,
+                    "category": reference.category,
+                    "premium_values": [],
+                    "deductible_values": [],
+                    "coverage_keywords": set(),
+                    "source_references": [],
+                },
+            )
+            if premium is not None:
+                bucket["premium_values"].append(premium)
+            if deductible is not None:
+                bucket["deductible_values"].append(deductible)
+            bucket["coverage_keywords"].update(self._extract_coverage_keywords(text))
+            bucket["source_references"].append(
+                {
+                    "source_file": reference.source_file,
+                    "source_path": reference.source_path,
+                    "chunk_id": reference.chunk_id,
+                }
+            )
+
+        output = []
+        for data in grouped.values():
+            premium_values = data["premium_values"]
+            deductible_values = data["deductible_values"]
+            output.append(
+                {
+                    "policy_id": data["policy_id"],
+                    "policy_name": data["policy_name"],
+                    "category": data["category"],
+                    "premium_monthly": (sum(premium_values) / len(premium_values)) if premium_values else None,
+                    "deductible_individual": (sum(deductible_values) / len(deductible_values)) if deductible_values else None,
+                    "coverage_keywords": sorted(data["coverage_keywords"]),
+                    "source_references": data["source_references"],
+                }
+            )
+        return output
+
     def _cross_reference(self, extracted_fields: dict) -> list[Document]:
         """Retrieve all matching contract records from the knowledge base via semantic search.
 
@@ -347,9 +441,18 @@ class AgentDocReaderService(BaseService):
             f"Uploaded Contract Fields:\n{json.dumps(extracted_fields, indent=2)}\n\n"
             f"Knowledge Base Contracts (retrieved):\n{context}"
         )
-        llm_output: _AuditLLMOutput = structured_llm.invoke(prompt)
+        try:
+            llm_output: _AuditLLMOutput = structured_llm.invoke(prompt)
+        except Exception:
+            llm_output = _AuditLLMOutput(
+                discrepancies=[],
+                audit_verdict="NEEDS_REVIEW",
+                explanation="Audit model response could not be fully validated.",
+                confidence=0.5,
+            )
 
         references = [self._build_document_reference(doc) for doc in docs]
+        matched_candidates = self._build_matched_candidates(docs)
 
         return AuditResult(
             file_name=file_name,
@@ -361,6 +464,7 @@ class AgentDocReaderService(BaseService):
             audit_verdict=llm_output.audit_verdict,
             explanation=llm_output.explanation,
             confidence=llm_output.confidence,
+            matched_candidates=matched_candidates,
         )
 
     # ------------------------------------------------------------------
