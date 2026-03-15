@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class JudgeEntity:
+class AuditorEntity:
     price_weight: float = 0.4
     policy_utilization_weight: float = 0.2
     coverage_weight: float = 0.2

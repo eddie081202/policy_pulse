@@ -61,7 +61,7 @@ def main() -> int:
 
     from agent_reading_bills.main import build_user_payload
     from agent_doc_reader.main import audit_document
-    from judge.main import evaluate_payload
+    from agent_audit.main import evaluate_payload
 
     bill_path, contract_path = _resolve_paths(args.bill, args.contract)
 

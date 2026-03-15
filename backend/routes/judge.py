@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from agent_doc_reader.main import audit_document
 from agent_reading_bills.main import build_user_payload
-from judge.main import evaluate_payload
+from agent_audit.main import evaluate_payload
 
 router = APIRouter(prefix="/api/judge", tags=["judge"])
 
