@@ -1081,6 +1081,70 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 11: 2D RAG Viz -->
+  <div class="slide" id="slide-11">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div>
+          <div class="ring1"></div>
+          <div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>RAG Visualization</div>
+    </header>
+    <div class="slide-body" style="padding-bottom:1rem;">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        RAG Vectorstore · 1,472 Documents
+      </div>
+      <h2 class="slide-title">2D t-SNE <span class="accent">Embedding Space</span></h2>
+      <p class="slide-subtitle" style="margin-bottom:.75rem;">Each dot is a chunked contract document, colored by insurance category. Clusters reveal semantic similarity — hover any point for source &amp; text preview.</p>
+      <iframe
+        src="data/viz_2d.html"
+        style="flex:1;width:100%;border:1px solid #334155;border-radius:12px;background:#0f172a;min-height:0;"
+        title="2D t-SNE RAG Vectorstore Visualization"
+      ></iframe>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 12: 3D RAG Viz -->
+  <div class="slide" id="slide-12">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div>
+          <div class="ring1"></div>
+          <div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>RAG Visualization</div>
+    </header>
+    <div class="slide-body" style="padding-bottom:1rem;">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        RAG Vectorstore · 3D Interactive View
+      </div>
+      <h2 class="slide-title">3D t-SNE <span class="accent">Embedding Space</span></h2>
+      <p class="slide-subtitle" style="margin-bottom:.75rem;">Rotate, zoom, and pan the 3D plot to explore how semantic embeddings from different insurance contract categories naturally cluster in high-dimensional space.</p>
+      <iframe
+        src="data/viz_3d.html"
+        style="flex:1;width:100%;border:1px solid #334155;border-radius:12px;background:#0f172a;min-height:0;"
+        title="3D t-SNE RAG Vectorstore Visualization"
+      ></iframe>
+    </div>
+  </div>
+
 </div><!-- end .deck -->
 
 
