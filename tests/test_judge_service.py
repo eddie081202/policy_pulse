@@ -5,7 +5,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from agent_audit.main import evaluate_payload
+from agent_auditor.main import evaluate_payload
 
 
 def test_judge_service_returns_contract_shape():

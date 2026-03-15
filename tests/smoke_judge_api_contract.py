@@ -50,7 +50,7 @@ def run_smoke_test() -> None:
         return _FakeAuditResult()
 
     def fake_evaluate_payload(parser_payload: dict, rag_payload: dict, preference: str):
-        from agent_audit.main import evaluate_payload as real_evaluate_payload
+        from agent_auditor.main import evaluate_payload as real_evaluate_payload
 
         return real_evaluate_payload(parser_payload, rag_payload, preference=preference)
 

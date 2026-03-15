@@ -7,12 +7,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ..entities import JudgeEntity
+from ..entities import AuditorEntity
 
 PreferenceMode = Literal["price", "policy", "no_preference"]
 
 
-class JudgeWeights(BaseModel):
+class AuditorWeights(BaseModel):
     price_score: float
     policy_utilization_score: float
     coverage_score: float
@@ -26,7 +26,7 @@ class ScoreBreakdown(BaseModel):
     relative_policy_quality_score: float
 
 
-class JudgeSource(BaseModel):
+class AuditorSource(BaseModel):
     file_name: str | None = None
     category: str | None = None
 
@@ -47,7 +47,7 @@ class SourceReference(BaseModel):
 class CurrentPolicyResult(BaseModel):
     policy_id: str | None = None
     policy_name: str | None = None
-    source: JudgeSource
+    source: AuditorSource
     score_breakdown: ScoreBreakdown
     final_weighted_score: float
     verdict: Literal["excellent_fit", "good_fit", "needs_attention", "poor_fit"]
@@ -82,7 +82,7 @@ class JudgeResult(BaseModel):
     request_id: str
     preference: PreferenceMode
     total_score: float
-    weights: JudgeWeights
+    weights: AuditorWeights
     current_policy: CurrentPolicyResult
     alternatives: list[AlternativeResult]
     recommendation: JudgeRecommendation
@@ -105,8 +105,8 @@ class JudgeInput(BaseModel):
     preference: PreferenceMode = "no_preference"
 
 
-class JudgeService:
-    def __init__(self, entity: JudgeEntity):
+class AuditorService:
+    def __init__(self, entity: AuditorEntity):
         self.entity = entity
 
     def evaluate(self, payload: JudgeInput) -> JudgeResult:
@@ -147,7 +147,7 @@ class JudgeService:
             request_id=str(uuid.uuid4()),
             preference=payload.preference,
             total_score=current_result.final_weighted_score,
-            weights=JudgeWeights(
+            weights=AuditorWeights(
                 price_score=self.entity.price_weight,
                 policy_utilization_score=self.entity.policy_utilization_weight,
                 coverage_score=self.entity.coverage_weight,
@@ -369,7 +369,7 @@ class JudgeService:
         return CurrentPolicyResult(
             policy_id=candidate.policy_id,
             policy_name=candidate.policy_name,
-            source=JudgeSource(
+            source=AuditorSource(
                 file_name=contract_payload.get("file_name"),
                 category=self._infer_category(rag_payload),
             ),
