@@ -3,13 +3,7 @@
 
 # Environments
 .env
-<<<<<<< HEAD
-.venv/
-venv/
-env/
-=======
 .venv
->>>>>>> ee6a812 (Add .gitignore entries for environment and build files; create settings for VSCode)
 
 # Node/Next.js
 node_modules/
@@ -22,11 +16,7 @@ yarn-error.log*
 
 # Python
 __pycache__/
-<<<<<<< HEAD
-
-=======
 *.pyc
->>>>>>> ee6a812 (Add .gitignore entries for environment and build files; create settings for VSCode)
 
 # Data and Vector DB
 data/
