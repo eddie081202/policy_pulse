@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
@@ -11,7 +10,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel
@@ -52,16 +51,17 @@ from pydantic import BaseModel, Field
 class _AuditLLMOutput(BaseModel):
     discrepancies: list[str] = Field(
         description=(
-            "List of discrepancies found between the uploaded contract and the best-matching "
-            "knowledge base contract. Each item must be a plain human-readable sentence string, "
+            "List of discrepancies found between the uploaded contract and any of the retrieved "
+            "knowledge base contracts. Each item must be a plain human-readable sentence string, "
             "e.g. 'Deductible is $2,000 in the upload but $1,000 in the knowledge base.' "
             "Return an empty list if no discrepancies are found."
         )
     )
     audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"] = Field(
         description=(
-            "PASS if the uploaded contract hit > 70% matches a knowledge base contract. "
-            "FAIL if it cannot hit 70% confidence score from all knowledge base contracts. "
+            "PASS if the uploaded contract's key fields are consistent with the knowledge base "
+            "contracts at > 70% confidence. "
+            "FAIL if it cannot reach 70% confidence against any knowledge base contract. "
             "NEEDS_REVIEW if uncertain."
         )
     )
@@ -73,12 +73,36 @@ class _AuditLLMOutput(BaseModel):
     )
 
 
+class DocumentReference(BaseModel):
+    """Structured pointer to a matched knowledge-base chunk.
+
+    A downstream agent can use this to reload the original document
+    without re-running the retrieval pipeline.
+    """
+    chunk_id: str = Field(description="Chunk or record identifier within the source file.")
+    source_file: str = Field(description="Filename of the source document (PDF or CSV).")
+    source_path: str = Field(description="Absolute path to the source file on disk.")
+    category: Optional[str] = Field(
+        default=None,
+        description="Contract category folder ('auto', 'health', 'homeowners', 'life_other') or None for CSV.",
+    )
+    page: Optional[int] = Field(
+        default=None,
+        description="0-based page number within the source PDF; None for CSV records.",
+    )
+    text: str = Field(description="Raw chunk text as indexed in the vectorstore.")
+    score: Optional[float] = Field(
+        default=None,
+        description="Retrieval relevance score (0.0–1.0). Reserved for future use; None until score-aware retrieval is enabled.",
+    )
+
+
 class AuditResult(BaseModel):
     file_name: str
     file_type: Literal["pdf", "image"]
     document_type: Literal["contract", "unknown"]
     extracted_fields: dict
-    matched_context: str
+    matched_documents: list[DocumentReference]
     discrepancies: list[str]
     audit_verdict: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
     explanation: str
@@ -88,7 +112,7 @@ class AuditResult(BaseModel):
 class AgentDocReaderService(BaseService):
     def __init__(self, entity: AgentDocReaderEntity):
         super().__init__(entity)
-        self._merged_retriever = None
+        self._retriever = None
         self._unified_chain = None
 
     # ------------------------------------------------------------------
@@ -110,6 +134,7 @@ class AgentDocReaderService(BaseService):
             metadata = {
                 field: str(row[field]) for field in self.entity.metadata_fields
             }
+            metadata["source_type"] = "csv"
             documents.append(Document(page_content=text, metadata=metadata))
         return documents
 
@@ -119,12 +144,12 @@ class AgentDocReaderService(BaseService):
             return self._unified_chain
 
         os.environ["OPENAI_API_KEY"] = self.entity.api_key
-        merged_retriever = self._get_merged_retriever()
+        retriever = self._get_retriever()
         prompt = ChatPromptTemplate.from_template(self.entity.system_prompt)
 
         self._unified_chain = (
             {
-                "context": merged_retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
+                "context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
                 "question": RunnablePassthrough(),
             }
             | prompt
@@ -133,31 +158,35 @@ class AgentDocReaderService(BaseService):
         )
         return self._unified_chain
 
-    def _get_merged_retriever(self):
-        """Build and cache the merged retriever (CSV + PDF) with no LLM step."""
-        if self._merged_retriever is not None:
-            return self._merged_retriever
+    def _get_retriever(self, category: Optional[str] = None):
+        """Build a retriever against the unified vectorstore.
 
+        When *category* is provided, results are filtered to that category's PDF
+        documents plus all CSV rows. The unfiltered retriever is cached.
+        """
         os.environ["OPENAI_API_KEY"] = self.entity.api_key
+
+        if category is None and self._retriever is not None:
+            return self._retriever
+
         embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
 
-        csv_retriever = Chroma(
+        search_kwargs: dict = {"k": self.entity.k}
+        if category is not None:
+            search_kwargs["filter"] = {
+                "$or": [{"source_type": "csv"}, {"category": category}]
+            }
+
+        retriever = Chroma(
             collection_name=self.entity.collection_name,
             embedding_function=embeddings,
-            persist_directory=self.entity.csv_vectorstore_path,
-        ).as_retriever(search_kwargs={"k": self.entity.k})
+            persist_directory=self.entity.vectorstore_path,
+        ).as_retriever(search_kwargs=search_kwargs)
 
-        pdf_retriever = Chroma(
-            collection_name=self.entity.pdf_collection_name,
-            embedding_function=embeddings,
-            persist_directory=self.entity.pdf_vectorstore_path,
-        ).as_retriever(search_kwargs={"k": self.entity.k})
+        if category is None:
+            self._retriever = retriever
 
-        def _merge(query: str) -> list[Document]:
-            return csv_retriever.invoke(query) + pdf_retriever.invoke(query)
-
-        self._merged_retriever = RunnableLambda(_merge)
-        return self._merged_retriever
+        return retriever
 
     # ------------------------------------------------------------------
     # Audit private helpers
@@ -213,43 +242,68 @@ class AgentDocReaderService(BaseService):
         result: _ContractFields = structured_llm.invoke(prompt)
         return result.model_dump()
 
-    def _exact_pdf_lookup(self, policy_number: str) -> list[str]:
-        """Direct text search in pdf_chunks.jsonl for a specific policy number.
+    def _detect_category(self, extracted_fields: dict) -> Optional[str]:
+        """Derive the storage category from extracted contract fields.
 
-        Semantic search is unreliable for exact identifiers. This guarantees
-        we find the document if it exists in the knowledge base.
+        Checks 'contract_type' and 'coverage_category' against the entity's
+        contract_type_to_category mapping using case-insensitive substring matching.
+        Returns the matched category string, or None if the type is unknown.
         """
-        jsonl_path = Path(self.entity.pdf_chunks_path)
-        if not jsonl_path.exists():
-            return []
-        matches = []
-        with jsonl_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                row = line.strip()
-                if not row:
-                    continue
-                record = json.loads(row)
-                if policy_number in record.get("text", ""):
-                    matches.append(record["text"])
-        return matches
+        mapping = self.entity.contract_type_to_category
+        for field_key in ("contract_type", "coverage_category"):
+            value = (extracted_fields.get(field_key) or "").lower()
+            if not value:
+                continue
+            for keyword, category in mapping.items():
+                if keyword in value:
+                    return category
+        return None
 
-    def _cross_reference(self, extracted_fields: dict) -> str:
-        """Retrieve matching contract records from the knowledge base.
+    def _build_document_reference(self, doc: Document) -> DocumentReference:
+        """Build a structured DocumentReference from a retrieved LangChain Document.
 
-        Priority 1 — exact policy number lookup directly in the JSONL (deterministic).
-        Priority 2 — semantic retrieval from both vectorstores for broader context.
+        PDF chunks carry 'source_file', 'category', and optionally 'page' in their
+        metadata (set during transform_pdf_for_rag). CSV Documents carry 'contract_id'
+        and no 'source_file', so they are identified via entity.csv_path.
         """
-        sections: list[str] = []
+        meta = doc.metadata or {}
+        is_pdf = meta.get("source_type") == "pdf" or "source_file" in meta
 
-        # Priority 1: exact match by policy number
-        policy_number = extracted_fields.get("policy_number")
-        if policy_number:
-            exact_chunks = self._exact_pdf_lookup(policy_number)
-            if exact_chunks:
-                header = f"=== EXACT MATCH (policy number: {policy_number}) ==="
-                sections.append(header + "\n\n" + "\n\n---\n\n".join(exact_chunks))
+        if is_pdf:
+            source_file = meta["source_file"]
+            category = meta.get("category")
+            source_path = str(
+                Path(self.entity.pdf_dir) / category / source_file
+                if category
+                else Path(self.entity.pdf_dir) / source_file
+            )
+            chunk_id = str(meta.get("chunk_id", ""))
+            page = meta.get("page")  # int or None
+        else:
+            source_file = Path(self.entity.csv_path).name
+            source_path = self.entity.csv_path
+            category = None
+            chunk_id = str(meta.get("contract_id", ""))
+            page = None
 
-        # Priority 2: semantic retrieval
+        return DocumentReference(
+            chunk_id=chunk_id,
+            source_file=source_file,
+            source_path=source_path,
+            category=category,
+            page=int(page) if page is not None else None,
+            text=doc.page_content,
+        )
+
+    def _cross_reference(self, extracted_fields: dict) -> list[Document]:
+        """Retrieve all matching contract records from the knowledge base via semantic search.
+
+        When the contract type maps to a known category, retrieval is scoped to
+        that category's documents. Otherwise the full knowledge base is searched.
+
+        Returns:
+            List of matched Document objects (empty list if none found).
+        """
         parts = []
         for key in ("contract_type", "coverage_category", "policy_number", "contract_id"):
             val = extracted_fields.get(key)
@@ -257,49 +311,52 @@ class AgentDocReaderService(BaseService):
                 parts.append(f"{key.replace('_', ' ')} {val}")
         parts.append("deductible copay exclusions coverage terms")
         query = " ".join(parts)
-        docs: list[Document] = self._get_merged_retriever().invoke(query)
-        if docs:
-            sections.append(
-                "=== SEMANTIC RESULTS ===\n\n"
-                + "\n\n---\n\n".join(doc.page_content for doc in docs)
-            )
 
-        return "\n\n" + ("=" * 60) + "\n\n".join(sections)
+        category = self._detect_category(extracted_fields)
+        return self._get_retriever(category).invoke(query)
 
     def _run_audit(
         self,
         file_name: str,
         file_type: str,
         extracted_fields: dict,
-        context: str,
+        docs: list[Document],
     ) -> "AuditResult":
-        """Ask the LLM to compare the uploaded contract against existing data."""
+        """Ask the LLM to compare the uploaded contract against all retrieved knowledge-base documents."""
         os.environ["OPENAI_API_KEY"] = self.entity.api_key
         llm = ChatOpenAI(model=self.entity.llm_model_name, temperature=0)
         structured_llm = llm.with_structured_output(_AuditLLMOutput, method="function_calling")
 
+        context = (
+            "=== RETRIEVED KNOWLEDGE BASE CONTRACTS ===\n\n"
+            + "\n\n---\n\n".join(doc.page_content for doc in docs)
+            if docs else ""
+        )
+
         prompt = (
             "You are an expert insurance contract analyst.\n\n"
-            "STEP 1 — Find the best match: From the knowledge base documents below, identify the single "
-            "contract that most closely matches the uploaded contract (prioritise: policy number, "
-            "contract type, deductible, and premium).\n\n"
-            "STEP 2 — Compare: Compare the uploaded contract fields only against that best-matching "
-            "contract. List only genuine discrepancies between the two.\n\n"
-            "STEP 3 — Verdict (choose exactly one):\n"
+            "STEP 1 — Compare: Compare the uploaded contract fields against ALL knowledge base contracts "
+            "listed below. Identify every genuine discrepancy between the uploaded contract and any of the "
+            "retrieved contracts (differences in policy number, contract type, deductible, premium, "
+            "coverage terms, exclusions, copays, etc.).\n\n"
+            "STEP 2 — Verdict (choose exactly one):\n"
             "  • PASS — the uploaded contract's key fields (policy number, contract type, deductible, "
-            "premium) match the best-matching knowledge base contract closely. Output has > 70% confidence.\n"
-            "  • FAIL — the uploaded contract cannot hit 70% confidence score from all knowledge base contracts.\n"
-            "  • NEEDS_REVIEW — partial match, or insufficient data to decide confidently.\n\n"
+            "premium) are consistent with the knowledge base contracts at > 70% confidence.\n"
+            "  • FAIL — the uploaded contract cannot reach 70% confidence against any knowledge base contract.\n"
+            "  • NEEDS_REVIEW — partial matches, conflicting evidence, or insufficient data to decide confidently.\n\n"
             f"Uploaded Contract Fields:\n{json.dumps(extracted_fields, indent=2)}\n\n"
             f"Knowledge Base Contracts (retrieved):\n{context}"
         )
         llm_output: _AuditLLMOutput = structured_llm.invoke(prompt)
+
+        references = [self._build_document_reference(doc) for doc in docs]
+
         return AuditResult(
             file_name=file_name,
             file_type=file_type,
             document_type="contract",
             extracted_fields=extracted_fields,
-            matched_context=context,
+            matched_documents=references,
             discrepancies=llm_output.discrepancies,
             audit_verdict=llm_output.audit_verdict,
             explanation=llm_output.explanation,
@@ -310,29 +367,40 @@ class AgentDocReaderService(BaseService):
     # Public interface
     # ------------------------------------------------------------------
 
-    def initialize_csv_vectorstore(self) -> None:
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
+    def initialize_vectorstore(self) -> int:
+        """Initialize the unified Chroma vectorstore with both CSV and PDF data.
 
+        Skips ingestion if the collection is already populated.
+
+        Returns:
+            Total number of vectors in the collection.
+        """
+        os.environ["OPENAI_API_KEY"] = self.entity.api_key
         embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
         vectorstore = Chroma(
             collection_name=self.entity.collection_name,
             embedding_function=embeddings,
-            persist_directory=self.entity.csv_vectorstore_path,
+            persist_directory=self.entity.vectorstore_path,
         )
 
         existing = vectorstore.get()
         if existing["ids"]:
-            return
+            return len(existing["ids"])
 
-        documents = self._transform_csv()
-        vectorstore.add_documents(documents)
+        # Ingest CSV rows
+        vectorstore.add_documents(self._transform_csv())
+
+        # Ingest PDF chunks (build JSONL first if not already done)
+        if not Path(self.entity.pdf_chunks_path).exists():
+            self.transform_pdf_for_rag()
+        texts, metadatas, ids = self._read_jsonl_records()
+        vectorstore.add_texts(texts=texts, metadatas=metadatas, ids=ids)
+
+        return len(vectorstore.get()["ids"])
 
     def query_contracts(self, question: str) -> str:
         """Query the unified contracts vectorstore (CSV + PDF) and return a natural language answer."""
-        self.initialize_csv_vectorstore()
-        if not Path(self.entity.pdf_vectorstore_path).exists():
-            self.transform_pdf_for_rag()
-            self.initialize_pdf_vectorstore()
+        self.initialize_vectorstore()
         return self._get_unified_chain().invoke(question)
 
     def audit_document(self, file_path: str) -> AuditResult:
@@ -344,15 +412,12 @@ class AgentDocReaderService(BaseService):
         Returns:
             AuditResult with extracted fields, matched context, discrepancies, and verdict.
         """
-        self.initialize_csv_vectorstore()
-        if not Path(self.entity.pdf_vectorstore_path).exists():
-            self.transform_pdf_for_rag()
-            self.initialize_pdf_vectorstore()
+        self.initialize_vectorstore()
 
         text, file_type = self._ingest_file(file_path)
         extracted = self._extract_fields(text)
-        context = self._cross_reference(extracted)
-        return self._run_audit(Path(file_path).name, file_type, extracted, context)
+        docs = self._cross_reference(extracted)
+        return self._run_audit(Path(file_path).name, file_type, extracted, docs)
 
     # ------------------------------------------------------------------
     # PDF Transformation: Load → Chunk → Serialize to JSONL
@@ -373,6 +438,8 @@ class AgentDocReaderService(BaseService):
             pages = self._load_pages_from_pdf(pdf_file)
             for page in pages:
                 page.metadata["source_file"] = pdf_file.name
+                page.metadata["category"] = pdf_file.parent.name
+                page.metadata["source_type"] = "pdf"
             all_pages.extend(pages)
 
         chunks = self._split_documents(all_pages)
@@ -382,39 +449,16 @@ class AgentDocReaderService(BaseService):
 
         return len(pdf_files), len(all_pages), total_chunks
 
-    def initialize_pdf_vectorstore(self) -> int:
-        """Initialize Chroma vectorstore from PDF chunks.
-
-        Returns:
-            Count of vectors created
-        """
-        texts, metadatas, ids = self._read_jsonl_records()
-        self._maybe_reset_persist_dir()
-
-        os.environ["OPENAI_API_KEY"] = self.entity.api_key
-        embeddings = OpenAIEmbeddings(model=self.entity.embedding_model_name)
-
-        vectorstore = Chroma.from_texts(
-            texts=texts,
-            embedding=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-            collection_name=self.entity.pdf_collection_name,
-            persist_directory=self.entity.pdf_vectorstore_path,
-        )
-
-        return len(texts)
-
     # ------------------------------------------------------------------
     # PDF Private helpers
     # ------------------------------------------------------------------
 
     def _find_pdf_files(self) -> list[Path]:
-        """Discover all PDF files in the configured directory."""
+        """Discover all PDF files recursively under the configured directory."""
         pdf_dir = Path(self.entity.pdf_dir)
         if not pdf_dir.exists():
             raise FileNotFoundError(f"PDF directory not found: {pdf_dir}")
-        return sorted([p for p in pdf_dir.glob("*.pdf") if p.is_file()])
+        return sorted([p for p in pdf_dir.rglob("*.pdf") if p.is_file()])
 
     def _load_pages_from_pdf(self, pdf_path: Path) -> list[Document]:
         """Load pages from a single PDF file."""
@@ -484,8 +528,4 @@ class AgentDocReaderService(BaseService):
 
         return texts, metadatas, ids
 
-    def _maybe_reset_persist_dir(self) -> None:
-        """Delete existing vectorstore directory if it exists."""
-        persist_path = Path(self.entity.pdf_vectorstore_path)
-        if persist_path.exists():
-            shutil.rmtree(persist_path)
+
