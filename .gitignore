@@ -21,3 +21,6 @@ __pycache__/
 # Data and Vector DB
 data/
 chroma_db/
+
+.vscode/
+.pytest_cache/

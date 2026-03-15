@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finsurance — AI Bill Auditor Presentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --slate-950: #020617;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-400: #94a3b8;
+      --slate-300: #cbd5e1;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --emerald-500: #10b981;
+      --emerald-400: #34d399;
+      --emerald-300: #6ee7b7;
+      --teal-400:   #2dd4bf;
+      --teal-300:   #5eead4;
+      --rose-500:   #f43f5e;
+      --amber-400:  #fbbf24;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--slate-950);
+      font-family: 'Space Grotesk', sans-serif;
+      color: var(--slate-100);
+    }
+
+    /* ─── Slide engine ─── */
+    .deck { width: 100vw; height: 100vh; position: relative; }
+
+    .slide {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      opacity: 0; pointer-events: none;
+      transition: opacity .45s cubic-bezier(.4,0,.2,1), transform .45s cubic-bezier(.4,0,.2,1);
+      transform: translateY(24px);
+      background: var(--slate-900);
+    }
+    .slide.active {
+      opacity: 1; pointer-events: all; transform: translateY(0);
+    }
+    .slide.prev {
+      opacity: 0; transform: translateY(-24px);
+    }
+
+    /* ─── Shared grid bg ─── */
+    .grid-bg {
+      position: absolute; inset: 0; pointer-events: none;
+      background-image:
+        linear-gradient(to right, rgba(255,255,255,.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    /* ─── Global header bar (reused across slides) ─── */
+    .app-header {
+      background: var(--slate-950);
+      border-bottom: 1px solid var(--slate-800);
+      padding: 0 2.5rem;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+      position: relative; z-index: 2;
+    }
+    .brand { display: flex; align-items: center; gap: .75rem; }
+    .brand-icon {
+      position: relative; width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .brand-icon .glow {
+      position: absolute; inset: 0;
+      background: var(--emerald-500); border-radius: 50%;
+      filter: blur(14px); opacity: .2;
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:.15} 50%{opacity:.3} }
+    .brand-icon .ring1 {
+      position: absolute; inset: 4px;
+      border: 2px solid rgba(52,211,153,.3);
+      border-radius: 6px; transform: rotate(45deg);
+    }
+    .brand-icon .ring2 {
+      position: absolute; inset: 4px;
+      border: 2px solid rgba(45,212,191,.3);
+      border-radius: 6px; transform: rotate(-45deg);
+    }
+    .brand-icon svg { position: relative; z-index: 1; }
+    .brand-name {
+      font-size: 1.6rem; font-weight: 800;
+      letter-spacing: -.05em; text-transform: uppercase;
+      background: linear-gradient(90deg, var(--emerald-400), var(--teal-300), var(--emerald-500));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .header-badge {
+      display: flex; align-items: center; gap: .4rem;
+      font-size: .7rem; font-weight: 600; color: var(--slate-400);
+      background: var(--slate-800); padding: .35rem .75rem;
+      border-radius: 999px; border: 1px solid var(--slate-700);
+    }
+    .header-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald-400); animation: pulse 2s infinite; }
+
+    /* ─── Slide body ─── */
+    .slide-body {
+      flex: 1; display: flex; flex-direction: column;
+      padding: 2.5rem 3.5rem; position: relative; overflow: hidden;
+    }
+
+    /* ─── Typography ─── */
+    .tag {
+      display: inline-flex; align-items: center; gap: .35rem;
+      font-size: .65rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--emerald-400); background: rgba(52,211,153,.08);
+      border: 1px solid rgba(52,211,153,.25);
+      padding: .3rem .75rem; border-radius: 4px; margin-bottom: 1rem;
+    }
+    .slide-title {
+      font-size: 2.6rem; font-weight: 800; line-height: 1.1;
+      letter-spacing: -.04em; color: #fff;
+      margin-bottom: .6rem;
+    }
+    .slide-title .accent {
+      background: linear-gradient(90deg, var(--emerald-400), var(--teal-300));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .slide-subtitle {
+      font-size: 1rem; color: var(--slate-400); line-height: 1.6;
+      max-width: 640px; margin-bottom: 2.2rem;
+    }
+
+    /* ─── Card ─── */
+    .card {
+      background: rgba(30,41,59,.55);
+      border: 1px solid var(--slate-700);
+      border-radius: 16px; padding: 1.4rem 1.6rem;
+      backdrop-filter: blur(6px);
+    }
+    .card-sm { padding: .9rem 1.1rem; border-radius: 12px; }
+    .card-accent { border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.05); }
+
+    /* ─── Grid layouts ─── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; }
+    .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
+
+    /* ─── Pill / badge ─── */
+    .pill {
+      font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      padding: .25rem .65rem; border-radius: 999px;
+    }
+    .pill-emerald { color: var(--emerald-300); background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.25); }
+    .pill-teal    { color: var(--teal-300);    background: rgba(45,212,191,.12);  border: 1px solid rgba(45,212,191,.25);  }
+    .pill-rose    { color: #fda4af;            background: rgba(244,63,94,.12);   border: 1px solid rgba(244,63,94,.25);   }
+    .pill-amber   { color: var(--amber-400);   background: rgba(251,191,36,.12);  border: 1px solid rgba(251,191,36,.25);  }
+
+    /* ─── Stat ─── */
+    .stat-num {
+      font-size: 2.4rem; font-weight: 800; letter-spacing: -.04em;
+      background: linear-gradient(90deg, var(--emerald-400), var(--teal-300));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label { font-size: .75rem; color: var(--slate-400); margin-top: .2rem; }
+
+    /* ─── Icon circle ─── */
+    .icon-circle {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.2);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .icon-circle.slate {
+      background: rgba(100,116,139,.12); border-color: var(--slate-700);
+    }
+
+    /* ─── Pipeline steps ─── */
+    .pipeline {
+      display: flex; align-items: center; gap: 0;
+      margin-top: .5rem;
+    }
+    .step {
+      flex: 1; text-align: center; padding: 1rem .75rem;
+      background: var(--slate-800);
+      border: 1px solid var(--slate-700);
+      border-radius: 12px; position: relative;
+    }
+    .step-num {
+      font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--emerald-400); margin-bottom: .3rem;
+    }
+    .step-title { font-size: .8rem; font-weight: 700; color: #fff; }
+    .step-sub   { font-size: .65rem; color: var(--slate-400); margin-top: .2rem; line-height: 1.4; }
+    .arrow {
+      width: 32px; flex-shrink: 0; text-align: center;
+      color: var(--emerald-400); font-size: 1rem; position: relative; z-index: 1;
+    }
+
+    /* ─── Score bar ─── */
+    .score-bar-wrap { margin-bottom: 1.1rem; }
+    .score-bar-header { display: flex; justify-content: space-between; margin-bottom: .35rem;
+      font-size: .75rem; color: var(--slate-300); font-weight: 600; }
+    .score-bar-bg { height: 6px; background: var(--slate-700); border-radius: 99px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--emerald-500), var(--teal-400));
+      transition: width 1s cubic-bezier(.4,0,.2,1); }
+
+    /* ─── Navigation ─── */
+    #nav {
+      position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: .75rem;
+      background: rgba(15,23,42,.85); backdrop-filter: blur(12px);
+      border: 1px solid var(--slate-700); border-radius: 999px;
+      padding: .6rem 1.2rem; z-index: 100;
+    }
+    .nav-btn {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 1px solid var(--slate-600);
+      background: var(--slate-800); color: var(--slate-300);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all .2s; font-size: .9rem;
+    }
+    .nav-btn:hover { background: var(--slate-700); color: #fff; border-color: var(--emerald-400); }
+    #slide-counter { font-size: .75rem; color: var(--slate-400); font-weight: 600; min-width: 48px; text-align: center; }
+    .nav-dots { display: flex; gap: 5px; }
+    .nav-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--slate-600); cursor: pointer; transition: all .2s;
+    }
+    .nav-dot.active { background: var(--emerald-400); width: 18px; border-radius: 3px; }
+
+    /* ─── Glow accent (decorative) ─── */
+    .glow-orb {
+      position: absolute; border-radius: 50%; pointer-events: none; filter: blur(80px); opacity: .12;
+    }
+
+    /* ─── Divider ─── */
+    hr.divider { border: none; border-top: 1px solid var(--slate-800); margin: 1rem 0; }
+
+    /* ─── List ─── */
+    .check-list { list-style: none; display: flex; flex-direction: column; gap: .6rem; }
+    .check-list li { display: flex; align-items: flex-start; gap: .6rem; font-size: .85rem; color: var(--slate-300); line-height: 1.5; }
+    .check-list li::before { content: ''; width: 16px; height: 16px; background: var(--emerald-400);
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
+      flex-shrink: 0; margin-top: 2px; }
+
+    .x-list { list-style: none; display: flex; flex-direction: column; gap: .55rem; }
+    .x-list li { display: flex; align-items: flex-start; gap: .6rem; font-size: .85rem; color: var(--slate-300); line-height: 1.5; }
+    .x-list li::before { content: ''; width: 16px; height: 16px; background: #f43f5e;
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E") center/contain no-repeat;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E") center/contain no-repeat;
+      flex-shrink: 0; margin-top: 2px; }
+
+    /* ─── Spin animation ─── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 3s linear infinite; }
+
+    /* ─── Animate in ─── */
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-up { animation: fadeUp .5s ease forwards; }
+    .animate-up-1 { animation-delay: .1s; opacity: 0; }
+    .animate-up-2 { animation-delay: .2s; opacity: 0; }
+    .animate-up-3 { animation-delay: .3s; opacity: 0; }
+    .animate-up-4 { animation-delay: .4s; opacity: 0; }
+    .animate-up-5 { animation-delay: .5s; opacity: 0; }
+
+    /* Slide-specific tweaks */
+    #slide-1 .slide-body {
+      justify-content: center; align-items: flex-start;
+    }
+    #slide-1 .hero-title {
+      font-size: 3.8rem; font-weight: 800; letter-spacing: -.06em; line-height: 1;
+      color: #fff; margin-bottom: 1.25rem;
+    }
+    #slide-1 .hero-title .accent {
+      display: block;
+      background: linear-gradient(90deg, var(--emerald-400) 0%, var(--teal-300) 50%, var(--emerald-500) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    #slide-1 .hero-desc {
+      max-width: 540px; font-size: 1.05rem; color: var(--slate-400); line-height: 1.7; margin-bottom: 2rem;
+    }
+    #slide-1 .pill-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+    #slide-1 .big-glow-1 {
+      width: 480px; height: 480px;
+      background: var(--emerald-500);
+      top: -80px; right: -80px;
+    }
+    #slide-1 .big-glow-2 {
+      width: 300px; height: 300px;
+      background: var(--teal-400);
+      bottom: 40px; right: 200px;
+    }
+
+    /* Keyboard hint */
+    .kbd-hint {
+      position: fixed; top: 1rem; right: 1.5rem;
+      font-size: .65rem; color: var(--slate-600);
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .kbd {
+      background: var(--slate-800); border: 1px solid var(--slate-700);
+      border-radius: 4px; padding: .1rem .4rem; font-size: .6rem; color: var(--slate-400);
+    }
+  </style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 1: Hero -->
+  <div class="slide active" id="slide-1">
+    <div class="grid-bg"></div>
+    <div class="glow-orb big-glow-1"></div>
+    <div class="glow-orb big-glow-2"></div>
+
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div>
+          <div class="ring1"></div>
+          <div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge">
+        <span class="dot"></span>
+        AI Auditor Dashboard
+      </div>
+    </header>
+
+    <div class="slide-body">
+      <div class="tag animate-up animate-up-1">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Next-Generation FinTech
+      </div>
+      <h1 class="hero-title animate-up animate-up-2">
+        Intelligent<br/>
+        <span class="accent">Insurance Bill</span><br/>
+        Finsurance
+      </h1>
+      <p class="hero-desc animate-up animate-up-3">
+        An AI-powered reconciliation engine that reads your insurance contracts and billing ledgers — then tells you exactly if you're overpaying and what to do about it.
+      </p>
+      <div class="pill-row animate-up animate-up-4">
+        <span class="pill pill-emerald">Multi-modal AI</span>
+        <span class="pill pill-teal">RAG-powered</span>
+        <span class="pill pill-emerald">Policy Scoring</span>
+        <span class="pill pill-teal">Alternatives Engine</span>
+        <span class="pill pill-amber">Real-time Analysis</span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 2: Problem -->
+  <div class="slide" id="slide-2">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div>
+          <div class="ring1"></div>
+          <div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>The Problem</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        The Problem Space
+      </div>
+      <h2 class="slide-title">Insurance is <span class="accent">Opaque</span> by Design</h2>
+      <p class="slide-subtitle">Millions of people overpay for insurance every year — not because of fraud, but because of complexity.</p>
+
+      <div class="grid-2" style="flex:1; align-content: start;">
+        <div class="card">
+          <h3 style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            Unreadable Contracts
+          </h3>
+          <ul class="x-list">
+            <li>Policy PDFs span 60–120 pages of legalese</li>
+            <li>Coverage exclusions buried in appendices</li>
+            <li>Key terms differ between providers</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            Billing Errors & Overcharges
+          </h3>
+          <ul class="x-list">
+            <li>Billed for services already covered</li>
+            <li>Incorrect deductible applications</li>
+            <li>Co-pay inconsistencies go unnoticed</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            No Easy Comparison
+          </h3>
+          <ul class="x-list">
+            <li>Dozens of competing plans with similar names</li>
+            <li>No objective scoring framework</li>
+            <li>Broker incentives misaligned with customer</li>
+          </ul>
+        </div>
+        <div class="card card-accent">
+          <div class="stat-num" style="font-size:3rem;">$2,000+</div>
+          <div class="stat-label" style="font-size:.8rem;">Average annual overpayment per household due to suboptimal insurance selection and billing errors.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 3: Solution -->
+  <div class="slide" id="slide-3">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Our Solution</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Solution
+      </div>
+      <h2 class="slide-title">An AI Engine that <span class="accent">Fights for You</span></h2>
+      <p class="slide-subtitle">Finsurance combines document intelligence, retrieval-augmented generation, and multi-dimensional scoring to give you a clear verdict on your policy.</p>
+
+      <div class="grid-3" style="flex:1; align-content:start;">
+        <div class="card">
+          <div class="icon-circle" style="margin-bottom:.8rem;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <h3 style="font-size:.9rem;font-weight:700;color:#fff;margin-bottom:.5rem;">Document Intelligence</h3>
+          <p style="font-size:.78rem;color:var(--slate-400);line-height:1.55;">Multi-modal AI reads PDF contracts and image-based bills. Extracts structured coverage data, deductibles, and itemized charges.</p>
+        </div>
+        <div class="card">
+          <div class="icon-circle" style="margin-bottom:.8rem;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <h3 style="font-size:.9rem;font-weight:700;color:#fff;margin-bottom:.5rem;">RAG Policy Vault</h3>
+          <p style="font-size:.78rem;color:var(--slate-400);line-height:1.55;">A ChromaDB vector store indexes thousands of real insurance policy documents. Semantically retrieves the most relevant comparators for your situation.</p>
+        </div>
+        <div class="card">
+          <div class="icon-circle" style="margin-bottom:.8rem;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3 style="font-size:.9rem;font-weight:700;color:#fff;margin-bottom:.5rem;">Judge Scoring Engine</h3>
+          <p style="font-size:.78rem;color:var(--slate-400);line-height:1.55;">Ranks your current policy on four axes — price, utilization, coverage, and relative quality — then surfaces ranked alternatives with clear delta reasoning.</p>
+        </div>
+        <div class="card" style="grid-column:1/-1;">
+          <div style="display:flex;align-items:center;gap:2rem;flex-wrap:wrap;">
+            <div style="flex:1;min-width:160px;">
+              <div class="stat-num">4</div>
+              <div class="stat-label">Scoring dimensions per policy</div>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <div class="stat-num">3</div>
+              <div class="stat-label">Preference modes: price, policy, balanced</div>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <div class="stat-num">∞</div>
+              <div class="stat-label">Policy documents searchable in vector store</div>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <div class="stat-num">&lt;30s</div>
+              <div class="stat-label">Full audit turnaround time</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 4: How It Works -->
+  <div class="slide" id="slide-4">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>How It Works</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Audit Pipeline
+      </div>
+      <h2 class="slide-title">Five Steps to<span class="accent"> Complete Clarity</span></h2>
+      <p class="slide-subtitle">From raw documents to actionable recommendations in a single API call.</p>
+
+      <div class="pipeline" style="margin-bottom:1.5rem;">
+        <div class="step">
+          <div class="step-num">Step 01</div>
+          <div style="margin:0 auto .5rem;width:36px;height:36px;border-radius:10px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          </div>
+          <div class="step-title">Upload</div>
+          <div class="step-sub">Contract PDF<br/>+ Bill image</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <div class="step-num">Step 02</div>
+          <div style="margin:0 auto .5rem;width:36px;height:36px;border-radius:10px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="step-title">Parse</div>
+          <div class="step-sub">OCR + LLM<br/>extraction</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <div class="step-num">Step 03</div>
+          <div style="margin:0 auto .5rem;width:36px;height:36px;border-radius:10px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <div class="step-title">Retrieve</div>
+          <div class="step-sub">Vector search<br/>ChromaDB</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <div class="step-num">Step 04</div>
+          <div style="margin:0 auto .5rem;width:36px;height:36px;border-radius:10px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8l4 4-4 4-4-4 4-4z"/></svg>
+          </div>
+          <div class="step-title">Judge</div>
+          <div class="step-sub">Score current<br/>vs alternatives</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step" style="border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.06);">
+          <div class="step-num">Step 05</div>
+          <div style="margin:0 auto .5rem;width:36px;height:36px;border-radius:10px;background:rgba(52,211,153,.15);border:1px solid rgba(52,211,153,.3);display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div class="step-title" style="color:var(--emerald-300);">Recommend</div>
+          <div class="step-sub">Actions +<br/>ranked plans</div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="card card-sm">
+          <div style="font-size:.7rem;font-weight:700;color:var(--emerald-400);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;">Agent: Doc Reader</div>
+          <p style="font-size:.75rem;color:var(--slate-400);line-height:1.5;">Reads multi-modal contract documents. Extracts coverage terms, premium, deductibles, and exclusions into structured JSON.</p>
+        </div>
+        <div class="card card-sm">
+          <div style="font-size:.7rem;font-weight:700;color:var(--emerald-400);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;">Agent: Bill Reader</div>
+          <p style="font-size:.75rem;color:var(--slate-400);line-height:1.5;">Processes invoice images and PDFs. Identifies line items, charged amounts, and cross-references coverage applicability.</p>
+        </div>
+        <div class="card card-sm">
+          <div style="font-size:.7rem;font-weight:700;color:var(--emerald-400);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem;">Agent: Judge</div>
+          <p style="font-size:.75rem;color:var(--slate-400);line-height:1.5;">Aggregates both agent outputs. Scores the policy, retrieves alternatives from the vector store, and generates ranked recommendations.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 5: Scoring -->
+  <div class="slide" id="slide-5">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Scoring Engine</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Judge Scoring Model
+      </div>
+      <h2 class="slide-title">Four-Axis <span class="accent">Policy Score</span></h2>
+      <p class="slide-subtitle">Every policy is evaluated across four independent dimensions. Your preference mode shifts the weighting to match your priorities.</p>
+
+      <div class="grid-2" style="flex:1;align-content:start;gap:1.25rem;">
+        <div style="display:flex;flex-direction:column;gap:1rem;">
+          <div class="score-bar-wrap">
+            <div class="score-bar-header"><span>💰 Price Score</span><span style="color:var(--emerald-400);">0 – 1.0</span></div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:82%"></div></div>
+            <p style="font-size:.7rem;color:var(--slate-500);margin-top:.3rem;">How competitive is the premium relative to market comparators for equivalent coverage?</p>
+          </div>
+          <div class="score-bar-wrap">
+            <div class="score-bar-header"><span>📊 Policy Utilization Score</span><span style="color:var(--emerald-400);">0 – 1.0</span></div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:65%"></div></div>
+            <p style="font-size:.7rem;color:var(--slate-500);margin-top:.3rem;">What fraction of covered services did your billing actually utilise?</p>
+          </div>
+          <div class="score-bar-wrap">
+            <div class="score-bar-header"><span>🛡️ Coverage Score</span><span style="color:var(--emerald-400);">0 – 1.0</span></div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:74%"></div></div>
+            <p style="font-size:.7rem;color:var(--slate-500);margin-top:.3rem;">Breadth and depth of coverage — deductibles, limits, exclusion density.</p>
+          </div>
+          <div class="score-bar-wrap">
+            <div class="score-bar-header"><span>⭐ Relative Policy Quality</span><span style="color:var(--emerald-400);">0 – 1.0</span></div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:58%"></div></div>
+            <p style="font-size:.7rem;color:var(--slate-500);margin-top:.3rem;">How does this policy rank against semantically-similar alternatives in the vault?</p>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:1rem;">
+          <div class="card">
+            <h3 style="font-size:.8rem;font-weight:700;color:#fff;margin-bottom:.75rem;">Preference Modes</h3>
+            <div style="display:flex;flex-direction:column;gap:.6rem;">
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--slate-900);border-radius:8px;padding:.6rem .8rem;">
+                <div>
+                  <div style="font-size:.75rem;font-weight:600;color:var(--slate-200);">Lower Price, Similar Policy</div>
+                  <div style="font-size:.65rem;color:var(--slate-500);margin-top:.1rem;">Upweights price score in final ranking</div>
+                </div>
+                <span class="pill pill-emerald">Price</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--slate-900);border-radius:8px;padding:.6rem .8rem;">
+                <div>
+                  <div style="font-size:.75rem;font-weight:600;color:var(--slate-200);">Better Policy, Similar Price</div>
+                  <div style="font-size:.65rem;color:var(--slate-500);margin-top:.1rem;">Upweights coverage &amp; quality scores</div>
+                </div>
+                <span class="pill pill-teal">Policy</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--slate-900);border-radius:8px;padding:.6rem .8rem;">
+                <div>
+                  <div style="font-size:.75rem;font-weight:600;color:var(--slate-200);">No Preference</div>
+                  <div style="font-size:.65rem;color:var(--slate-500);margin-top:.1rem;">Equal weighting across all four dimensions</div>
+                </div>
+                <span class="pill pill-amber">Balanced</span>
+              </div>
+            </div>
+          </div>
+          <div class="card card-accent">
+            <h3 style="font-size:.8rem;font-weight:700;color:var(--emerald-300);margin-bottom:.5rem;">Output: Ranked Alternatives</h3>
+            <p style="font-size:.75rem;color:var(--slate-400);line-height:1.55;">Each alternative shows: final weighted score, delta vs current policy (premium Δ, deductible Δ, coverage gap Δ), and plain-language "why it's better" bullets.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 6: Architecture -->
+  <div class="slide" id="slide-6">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Architecture</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        System Architecture
+      </div>
+      <h2 class="slide-title">Full-Stack <span class="accent">AI Platform</span></h2>
+      <p class="slide-subtitle">Three layers working in concert: a Next.js frontend, a FastAPI orchestration backend, and a multi-agent AI core backed by vector retrieval.</p>
+
+      <div style="flex:1;display:grid;grid-template-columns:1fr 2px 1fr 2px 1fr;gap:1.25rem;align-content:start;">
+        <!-- Frontend -->
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--teal-300);padding-bottom:.5rem;border-bottom:1px solid var(--slate-800);">Frontend Layer</div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">Next.js 14 (App Router)</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">React + TypeScript dashboard. File upload, real-time process stage tracking, result display with alternatives.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">Tailwind CSS + Space Grotesk</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Dark fintech design system. Glassmorphism cards, emerald accent palette, responsive grid layout.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">API Route Proxy</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Next.js API routes serve dataset files and proxy calls to the FastAPI backend securely.</p>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div style="background:var(--slate-800);border-radius:1px;margin:1.5rem 0;"></div>
+
+        <!-- Backend -->
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--emerald-400);padding-bottom:.5rem;border-bottom:1px solid var(--slate-800);">Backend Layer</div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">FastAPI + Uvicorn</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Python async REST API. Receives multipart document uploads and orchestrates the full agent pipeline.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">/api/judge/evaluate</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Single endpoint that accepts contract + bill, runs three agents, and returns a structured <code style="font-size:.65rem;color:var(--emerald-400);">JudgeResult</code> payload.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">Service / Entity Pattern</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Clean separation: entities hold data models, services contain business logic. Each agent module is independently testable.</p>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div style="background:var(--slate-800);border-radius:1px;margin:1.5rem 0;"></div>
+
+        <!-- AI Core -->
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--teal-300);padding-bottom:.5rem;border-bottom:1px solid var(--slate-800);">AI Core</div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">Agent: Doc Reader</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">LLM-powered contract parser. Handles multi-modal input (text + image). Outputs structured coverage entity.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">Agent: Bill Reader</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Invoice and bill image understanding. Line-item extraction and coverage applicability mapping.</p>
+          </div>
+          <div class="card card-sm">
+            <div style="font-size:.75rem;font-weight:700;color:#fff;margin-bottom:.3rem;">ChromaDB Vector Store</div>
+            <p style="font-size:.7rem;color:var(--slate-400);line-height:1.4;">Persistent embeddings of real policy PDFs. Semantic nearest-neighbour search powers alternative retrieval.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 7: Tech Stack -->
+  <div class="slide" id="slide-7">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Tech Stack</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Technology Stack
+      </div>
+      <h2 class="slide-title">Built on <span class="accent">Modern Infrastructure</span></h2>
+      <p class="slide-subtitle">Production-grade, open-source-first stack chosen for performance, flexibility, and AI-native capabilities.</p>
+
+      <div class="grid-4" style="flex:1;align-content:start;">
+        <!-- Row 1 -->
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">⚡</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">Next.js 14</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">React framework, App Router, API routes</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🐍</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">FastAPI</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Async Python REST backend, Pydantic models</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🧠</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">LLM Agents</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Multi-modal document understanding agents</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🗄️</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">ChromaDB</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Persistent vector store for policy embeddings</div>
+        </div>
+        <!-- Row 2 -->
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🎨</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">Tailwind CSS</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Utility-first responsive design system</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🔷</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">TypeScript</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Type-safe frontend with strict inference</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">📦</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">Pydantic v2</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Strict data validation across all API layers</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.2rem 1rem;">
+          <div style="font-size:1.8rem;margin-bottom:.5rem;">🔬</div>
+          <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:.25rem;">Pytest</div>
+          <div style="font-size:.68rem;color:var(--slate-400);">Unit + smoke tests for judge service & API</div>
+        </div>
+      </div>
+
+      <div class="card card-accent" style="margin-top:1rem;">
+        <div style="display:flex;align-items:center;gap:2rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span style="font-size:.75rem;color:var(--slate-300);">Health · Auto · Homeowners · Life</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span style="font-size:.75rem;color:var(--slate-300);">100+ insurance bills dataset</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span style="font-size:.75rem;color:var(--slate-300);">Multi-modal: PDF + image input</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span style="font-size:.75rem;color:var(--slate-300);">Confidence scoring & limitation reporting</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 8: UI Demo -->
+  <div class="slide" id="slide-8">
+    <div class="grid-bg"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Product UI</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Product Walkthrough
+      </div>
+      <h2 class="slide-title">Dashboard <span class="accent">in Action</span></h2>
+      <p class="slide-subtitle">A clean two-panel layout: submit documents on the left, get AI verdicts and ranked alternatives on the right.</p>
+
+      <!-- Mock UI screenshot -->
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;align-content:start;">
+        <!-- Left panel mock -->
+        <div class="card" style="padding:1.2rem;">
+          <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--emerald-400);margin-bottom:1rem;display:flex;align-items:center;gap:.4rem;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>
+            Initialize Analysis
+          </div>
+          <div style="background:var(--slate-900);border-radius:8px;padding:.7rem;margin-bottom:.75rem;border:1px solid var(--slate-700);">
+            <div style="font-size:.65rem;color:var(--slate-400);margin-bottom:.3rem;">Coverage Category</div>
+            <div style="font-size:.8rem;color:#fff;font-weight:600;">Health Insurance</div>
+          </div>
+          <div style="background:var(--slate-900);border-radius:8px;padding:.7rem;margin-bottom:.75rem;border:1px solid var(--slate-700);">
+            <div style="font-size:.65rem;color:var(--slate-400);margin-bottom:.3rem;">Recommendation Preference</div>
+            <div style="font-size:.8rem;color:#fff;font-weight:600;">No Preference</div>
+          </div>
+          <div style="border:2px dashed var(--slate-600);border-radius:10px;padding:.8rem;margin-bottom:.6rem;text-align:center;background:rgba(15,23,42,.5);">
+            <div style="font-size:.7rem;color:var(--slate-400);">📄 <span style="color:var(--emerald-400);font-weight:600;">Policy Contract</span> — Click to upload</div>
+          </div>
+          <div style="border:2px dashed var(--slate-600);border-radius:10px;padding:.8rem;margin-bottom:.8rem;text-align:center;background:rgba(15,23,42,.5);">
+            <div style="font-size:.7rem;color:var(--slate-400);">🧾 <span style="color:var(--emerald-400);font-weight:600;">Bill / Invoice</span> — Click to upload</div>
+          </div>
+          <div style="background:var(--emerald-500);border-radius:10px;padding:.65rem;text-align:center;">
+            <div style="font-size:.75rem;font-weight:800;color:var(--slate-950);text-transform:uppercase;letter-spacing:.05em;">Execute Audit</div>
+          </div>
+        </div>
+        <!-- Right panel mock -->
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div class="card card-accent" style="padding:1rem;">
+            <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem;">
+              <div style="width:28px;height:28px;border-radius:50%;background:rgba(52,211,153,.15);display:flex;align-items:center;justify-content:center;border:1px solid rgba(52,211,153,.3);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+              <div style="font-size:.8rem;font-weight:700;color:#fff;">Audit Result</div>
+              <span class="pill pill-emerald" style="margin-left:auto;">FAIR</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;font-size:.7rem;">
+              <div style="color:var(--slate-400);">Total Score: <span style="color:var(--emerald-400);font-weight:700;">0.74</span></div>
+              <div style="color:var(--slate-400);">Confidence: <span style="color:var(--emerald-400);font-weight:700;">0.86</span></div>
+            </div>
+          </div>
+          <div class="card card-sm" style="padding:.9rem;">
+            <div style="font-size:.72rem;font-weight:700;color:#fff;margin-bottom:.5rem;">Score Breakdown</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.35rem;font-size:.68rem;color:var(--slate-400);">
+              <span>Price: <b style="color:var(--emerald-400);">0.82</b></span>
+              <span>Utilization: <b style="color:var(--emerald-400);">0.65</b></span>
+              <span>Coverage: <b style="color:var(--emerald-400);">0.74</b></span>
+              <span>Quality: <b style="color:var(--emerald-400);">0.58</b></span>
+            </div>
+          </div>
+          <div class="card card-sm" style="padding:.9rem;">
+            <div style="font-size:.72rem;font-weight:700;color:#fff;margin-bottom:.5rem;">Recommendation</div>
+            <p style="font-size:.68rem;color:var(--emerald-300);line-height:1.5;">Consider switching to BlueShield Plan B — it offers 18% broader coverage at a $12/mo premium reduction.</p>
+          </div>
+          <div class="card card-sm" style="padding:.9rem;">
+            <div style="font-size:.72rem;font-weight:700;color:#fff;margin-bottom:.5rem;">#1 Alternative — BlueShield Plan B</div>
+            <div style="font-size:.68rem;color:var(--slate-400);">Score: <span style="color:var(--emerald-400);">0.89</span> · Δ premium: <span style="color:var(--emerald-400);">−$12/mo</span> · Δ coverage: <span style="color:var(--emerald-400);">+18%</span></div>
+            <ul style="margin-top:.4rem;font-size:.65rem;color:var(--slate-400);list-style:none;display:flex;flex-direction:column;gap:.2rem;">
+              <li>— Lower out-of-pocket maximum</li>
+              <li>— Covers specialist visits without referral</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 9: Impact -->
+  <div class="slide" id="slide-9">
+    <div class="grid-bg"></div>
+    <div class="glow-orb" style="width:400px;height:400px;background:var(--emerald-500);bottom:-100px;right:-80px;"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Impact & Vision</div>
+    </header>
+    <div class="slide-body">
+      <div class="tag">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Impact & Roadmap
+      </div>
+      <h2 class="slide-title">Empowering Every<br/><span class="accent">Policyholder</span></h2>
+      <p class="slide-subtitle">Financial transparency shouldn't be a luxury. Finsurance makes expert-level insurance analysis accessible to everyone.</p>
+
+      <div class="grid-3" style="margin-bottom:1.2rem;">
+        <div class="card" style="text-align:center;padding:1.4rem 1rem;">
+          <div class="stat-num">80%</div>
+          <div class="stat-label">of policyholders have never compared their plan against alternatives</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.4rem 1rem;">
+          <div class="stat-num">4</div>
+          <div class="stat-label">insurance categories already supported: Health, Auto, Homeowners, Life</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.4rem 1rem;">
+          <div class="stat-num">&lt;30s</div>
+          <div class="stat-label">to get a complete AI-powered audit with ranked alternatives</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3 style="font-size:.8rem;font-weight:700;color:#fff;margin-bottom:.75rem;display:flex;align-items:center;gap:.4rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+            What We've Built
+          </h3>
+          <ul class="check-list">
+            <li>Multi-modal document ingestion pipeline</li>
+            <li>Three-agent AI orchestration system</li>
+            <li>Four-dimension scoring with preference modes</li>
+            <li>ChromaDB-backed policy vector vault</li>
+            <li>Full-stack deployment (Next.js + FastAPI)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="font-size:.8rem;font-weight:700;color:#fff;margin-bottom:.75rem;display:flex;align-items:center;gap:.4rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            What's Next
+          </h3>
+          <ul class="check-list">
+            <li>Personalized recommendation memory</li>
+            <li>Automated claim dispute letter generation</li>
+            <li>Broker API integrations for live quotes</li>
+            <li>Mobile-native document capture</li>
+            <li>Longitudinal policy trend analytics</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════ SLIDE 10: CTA -->
+  <div class="slide" id="slide-10">
+    <div class="grid-bg"></div>
+    <div class="glow-orb" style="width:600px;height:600px;background:var(--emerald-500);top:-200px;left:50%;transform:translateX(-50%);"></div>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <div class="glow"></div><div class="ring1"></div><div class="ring2"></div>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="brand-name">Finsurance</span>
+      </div>
+      <div class="header-badge"><span class="dot"></span>Finsurance</div>
+    </header>
+    <div class="slide-body" style="justify-content:center;align-items:center;text-align:center;">
+      <div style="position:relative;z-index:1;max-width:640px;">
+        <div class="tag" style="justify-content:center;margin:0 auto 1.5rem;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Thank You
+        </div>
+        <h1 style="font-size:3.5rem;font-weight:800;letter-spacing:-.05em;line-height:1.05;color:#fff;margin-bottom:1rem;">
+          Know Your Policy.<br/>
+          <span style="background:linear-gradient(90deg,var(--emerald-400),var(--teal-300));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+            Keep Your Money.
+          </span>
+        </h1>
+        <p style="font-size:1rem;color:var(--slate-400);line-height:1.7;margin-bottom:2rem;">
+          Finsurance puts expert-level insurance auditing in the hands of every policyholder. Upload your documents. Get your verdict. Take action.
+        </p>
+        <div style="display:flex;justify-content:center;gap:1rem;flex-wrap:wrap;">
+          <div style="background:var(--emerald-500);border-radius:12px;padding:.75rem 2rem;font-weight:800;font-size:.85rem;color:var(--slate-950);letter-spacing:.03em;text-transform:uppercase;box-shadow:0 0 30px rgba(16,185,129,.25);">
+            Execute Audit →
+          </div>
+          <div style="background:var(--slate-800);border:1px solid var(--slate-600);border-radius:12px;padding:.75rem 2rem;font-weight:700;font-size:.85rem;color:var(--slate-200);letter-spacing:.03em;text-transform:uppercase;">
+            View Dataset Vault
+          </div>
+        </div>
+
+        <div style="margin-top:3rem;display:flex;justify-content:center;gap:2rem;flex-wrap:wrap;">
+          <span style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--slate-500);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Secure Document Vault
+          </span>
+          <span style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--slate-500);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            AI-Native Intelligence
+          </span>
+          <span style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--slate-500);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Real-time Analysis
+          </span>
+          <span style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--slate-500);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            Open Source Stack
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .deck -->
+
+
+<!-- ─── Navigation ─── -->
+<div id="nav">
+  <button class="nav-btn" id="btn-prev" title="Previous (←)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div class="nav-dots" id="nav-dots"></div>
+  <span id="slide-counter">1 / 10</span>
+  <button class="nav-btn" id="btn-next" title="Next (→)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+</div>
+
+<!-- <div class="kbd-hint">
+  <span class="kbd">←</span><span class="kbd">→</span> to navigate &nbsp;·&nbsp; <span class="kbd">F</span> fullscreen
+</div> -->
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const dotsContainer = document.getElementById('nav-dots');
+  const counter = document.getElementById('slide-counter');
+  let current = 0;
+
+  // Build dots
+  slides.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+    dot.addEventListener('click', () => goTo(i));
+    dotsContainer.appendChild(dot);
+  });
+
+  function goTo(n) {
+    const dots = dotsContainer.querySelectorAll('.nav-dot');
+    slides[current].classList.remove('active');
+    slides[current].classList.add('prev');
+    setTimeout(() => slides[current].classList.remove('prev'), 500);
+    dots[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, slides.length - 1));
+    slides[current].classList.add('active');
+    dots[current].classList.add('active');
+    counter.textContent = `${current + 1} / ${slides.length}`;
+  }
+
+  document.getElementById('btn-prev').addEventListener('click', () => goTo(current - 1));
+  document.getElementById('btn-next').addEventListener('click', () => goTo(current + 1));
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                  { e.preventDefault(); goTo(current - 1); }
+    if (e.key === 'f' || e.key === 'F') { document.documentElement.requestFullscreen?.(); }
+  });
+
+  // Touch / swipe
+  let touchX = 0;
+  document.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; });
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchX;
+    if (Math.abs(dx) > 50) goTo(current + (dx < 0 ? 1 : -1));
+  });
+</script>
+</body>
+</html>
