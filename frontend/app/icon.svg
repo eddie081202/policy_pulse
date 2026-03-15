@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer Rounded Square App Base -->
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bgLight)" />
+  
+  <!-- Strong Geometric Shield -->
+  <path d="M256 80 C256 80 120 112 120 256 C120 400 256 464 256 464 C256 464 392 400 392 256 C392 112 256 80 256 80 Z" fill="url(#shieldGrad)" />
+  
+  <!-- High Contrast Minimal Dollar Sign -->
+  <path d="M256 160 L256 352" stroke="#ffffff" stroke-width="48" stroke-linecap="round" />
+  <path d="M328 208 C328 174 290 160 256 160 C218 160 184 174 184 208 C184 242 216 256 256 256 C296 256 328 274 328 304 C328 338 290 352 256 352 C218 352 184 338 184 304" fill="none" stroke="#ffffff" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
